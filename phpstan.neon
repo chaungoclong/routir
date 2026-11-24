@@ -5,4 +5,5 @@ parameters:
         - tests
         - bin/routir
         - benchmarks
+        - examples
     tmpDir: .phpstan.cache

@@ -1,4 +1,5 @@
 /vendor/
 /tmp/
+/.idea/
 /.phpunit.cache/
 /.phpstan.cache/

@@ -84,6 +84,8 @@ composer install
 
 ### 1. Define Routes (`routes.php`)
 
+Return a typed closure `static function (Router $router): void` so your IDE provides full autocomplete and static type checking with zero undefined-variable warnings:
+
 ```php
 <?php
 
@@ -91,16 +93,18 @@ declare(strict_types=1);
 
 use Routir\API\Router;
 
-$router->get('/', static fn (): string => 'OK')->name('home');
-$router->get('/users/{id:int}', static fn (int $id): string => "User #{$id}")->name('users.show');
+return static function (Router $router): void {
+    $router->get('/', static fn (): string => 'OK')->name('home');
+    $router->get('/users/{id:int}', static fn (int $id): string => "User #{$id}")->name('users.show');
 
-$router->prefix('/api')->name('api.')->middleware(['json', 'auth'])->group(static function (Router $r): void {
-    $r->get('/posts/{slug:slug}', static fn (string $slug): string => "Post: {$slug}")
-        ->name('posts.show');
-    $r->get('/health', static fn (): string => 'healthy')
-        ->withoutMiddleware('auth')
-        ->name('health');
-});
+    $router->prefix('/api')->name('api.')->middleware(['json', 'auth'])->group(static function (Router $r): void {
+        $r->get('/posts/{slug:slug}', static fn (string $slug): string => "Post: {$slug}")
+            ->name('posts.show');
+        $r->get('/health', static fn (): string => 'healthy')
+            ->withoutMiddleware('auth')
+            ->name('health');
+    });
+};
 ```
 
 ### 2. Run in Interpreted Mode (Development)

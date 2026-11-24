@@ -135,8 +135,8 @@ function createContainer(): SimpleContainer
 
     return new SimpleContainer([
         ArticleStore::class => $store,
-        ArticleController::class => static fn (SimpleContainer $c): ArticleController => new ArticleController($c->get(ArticleStore::class)),
-        DeleteArticleHandler::class => static fn (SimpleContainer $c): DeleteArticleHandler => new DeleteArticleHandler($c->get(ArticleStore::class)),
+        ArticleController::class => static fn (): ArticleController => new ArticleController($store),
+        DeleteArticleHandler::class => static fn (): DeleteArticleHandler => new DeleteArticleHandler($store),
         'timing' => static fn (): TimingMiddleware => new TimingMiddleware(),
         'block' => static fn (): BlockMiddleware => new BlockMiddleware(),
     ]);

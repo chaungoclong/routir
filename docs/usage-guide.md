@@ -16,7 +16,7 @@ docker compose exec dev composer install
 ---
 
 ## 2. Định nghĩa Routes
-Tạo file `routes.php` (ví dụ [examples/routes.php](file:///home/long/Dev/router/examples/routes.php)):
+Tạo file `routes.php` trả về closure có typehint `Router $router` để IDE gợi ý đầy đủ và không báo lỗi biến chưa khai báo (xem [examples/routes.php](file:///home/long/Dev/router/examples/routes.php)):
 
 ```php
 <?php
@@ -24,20 +24,22 @@ declare(strict_types=1);
 
 use Routir\API\Router;
 
-$router->get('/', static fn (): string => 'OK')->name('home');
-$router->get('/users/{id:int}', static fn (int $id): string => "User #$id")->name('users.show');
+return static function (Router $router): void {
+    $router->get('/', static fn (): string => 'OK')->name('home');
+    $router->get('/users/{id:int}', static fn (int $id): string => "User #$id")->name('users.show');
 
-// Group với prefix, name prefix, middleware
-$router->prefix('/api')->name('api.')->middleware(['json', 'auth'])->group(function (Router $r): void {
-    $r->get('/posts/{slug:slug}', static fn (string $slug): string => "Post: $slug")
-        ->name('posts.show');
-    $r->get('/health', static fn (): string => 'healthy')
-        ->withoutMiddleware('auth')
-        ->name('health');
-});
+    // Group với prefix, name prefix, middleware
+    $router->prefix('/api')->name('api.')->middleware(['json', 'auth'])->group(function (Router $r): void {
+        $r->get('/posts/{slug:slug}', static fn (string $slug): string => "Post: $slug")
+            ->name('posts.show');
+        $r->get('/health', static fn (): string => 'healthy')
+            ->withoutMiddleware('auth')
+            ->name('health');
+    });
 
-// Fallback cho 404 (không áp dụng cho 400 / 405)
-$router->fallback(static fn (): string => 'Page not found');
+    // Fallback cho 404 (không áp dụng cho 400 / 405)
+    $router->fallback(static fn (): string => 'Page not found');
+};
 ```
 
 ### Các phương thức & Ràng buộc hỗ trợ

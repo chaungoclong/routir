@@ -92,3 +92,19 @@ public function compile(CompileConfig $config): array
      php bin/routir check examples/routes.php
      ```
 - Không sửa/bỏ qua assertion để làm test pass giả tạo; chỉ báo cáo pass khi đã chạy thực tế sau lần chỉnh sửa cuối cùng.
+
+---
+
+## 5. Quy chuẩn Git & Commit Message
+- **Conventional Commits**: sử dụng định dạng `<type>[optional scope]: <description>`:
+  - `feat`: thêm tính năng mới
+  - `fix`: sửa lỗi
+  - `refactor`: tái cấu trúc code (không đổi hành vi)
+  - `docs`: cập nhật tài liệu (`README.md`, `docs/`, `AGENTS.md`)
+  - `test`: thêm hoặc cập nhật test
+  - `perf`: tối ưu hiệu năng
+  - `chore` / `build` / `ci`: bảo trì, cấu hình tool, Docker, Composer
+- **Quy tắc viết message**:
+  - Dòng tiêu đề viết bằng tiếng Anh ngắn gọn, dạng mệnh lệnh (imperative), tối đa 72 ký tự, không kết thúc bằng dấu chấm.
+  - Nếu có thay đổi phức tạp, thêm phần thân (body) giải thích *tại sao* thay đổi.
+- **File không được commit**: tuyệt đối không commit thư mục IDE (`/.idea/`), dependencies (`/vendor/`), artifact tạm (`/tmp/`), và cache (`/.phpunit.cache/`, `/.phpstan.cache/`).
