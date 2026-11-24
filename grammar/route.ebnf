@@ -1,0 +1,12 @@
+(* Routir Route Pattern Grammar *)
+(* Target: PHP 8.4+ *)
+
+route        = "/" [ segment { "/" segment } ] ;
+segment      = literal | parameter ;
+parameter    = "{" identifier [ ":" constraint ] [ "?" ] "}" ;
+constraint   = identifier | "*" ;
+identifier   = (letter | "_") { letter | digit | "_" } ;
+literal      = literal_char { literal_char } ;
+literal_char = letter | digit | "-" | "_" | "." | "~" ;
+letter       = "a" … "z" | "A" … "Z" ;
+digit        = "0" … "9" ;

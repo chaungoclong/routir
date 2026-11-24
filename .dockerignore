@@ -1,0 +1,6 @@
+.git
+.phpunit.cache
+.phpstan.cache
+vendor
+var
+/tmp

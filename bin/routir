@@ -1,0 +1,325 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadCandidates = [
+    __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/../../../autoload.php',
+];
+
+$loaded = false;
+foreach ($autoloadCandidates as $file) {
+    if (is_file($file)) {
+        require $file;
+        $loaded = true;
+        break;
+    }
+}
+
+if (!$loaded) {
+    fwrite(STDERR, "Could not locate Composer autoloader.\n");
+    exit(1);
+}
+
+use Routir\API\RouteLoader;
+use Routir\API\Router;
+use Routir\Backend\PHP\PHPMatcherEmitter;
+use Routir\Compiler\CompileConfig;
+use Routir\Compiler\Compiler;
+use Routir\Compiler\CompilerOptions;
+use Routir\Exception\DiagnosticException;
+use Routir\Frontend\AST\LiteralNode;
+use Routir\Frontend\AST\ParameterNode;
+use Routir\Frontend\Lexer\Lexer;
+use Routir\Frontend\Parser\Parser;
+use Routir\Semantic\SemanticAnalyzer;
+
+$rawArgv = $_SERVER['argv'] ?? [];
+/** @var list<string> $argv */
+$argv = is_array($rawArgv)
+    ? array_values(array_map(static fn (mixed $v): string => is_string($v) ? $v : '', $rawArgv))
+    : [];
+$command = $argv[1] ?? null;
+
+if ($command === null || $command === '--help' || $command === '-h') {
+    echo "Routir CLI\n";
+    echo "Usage:\n";
+    echo "  routir build [<routes>] [--input=PATH] --output=DIR [--config=FILE] [-O0|-O1|-O2]\n";
+    echo "  routir check [<routes>] [--input=PATH] [--config=FILE]\n";
+    echo "  routir list [<routes>] [--input=PATH] [--config=FILE]\n";
+    echo "  routir dump:tokens <pattern>\n";
+    echo "  routir dump:ast <pattern>\n";
+    echo "  routir dump:ir [<routes>] [--input=PATH] [--stage=hir|mir|lir] [-O0|-O1|-O2]\n";
+    echo "  routir dump:code [<routes>] [--input=PATH] [-O0|-O1|-O2]\n";
+    echo "  routir clear [--output=DIR] [--config=FILE]\n";
+    exit(0);
+}
+
+/**
+ * @param list<string> $inputs
+ * @return array{router: Router, files: list<string>}
+ */
+function loadRoutesFromPaths(array $inputs): array
+{
+    $router = new Router();
+    $files = RouteLoader::loadInto($router, $inputs);
+
+    return ['router' => $router, 'files' => $files];
+}
+
+/**
+ * @param list<string> $args
+ * @return array{positional: list<string>, inputs: list<string>, output: ?string, config: ?string, opt: ?int, stage: string}
+ */
+function parseCliArgs(array $args): array
+{
+    $positional = [];
+    $inputs = [];
+    $output = null;
+    $config = null;
+    $opt = null;
+    $stage = 'lir';
+
+    foreach ($args as $arg) {
+        if (str_starts_with($arg, '--input=')) {
+            $val = substr($arg, 8);
+            foreach (explode(',', $val) as $part) {
+                if ($part !== '') {
+                    $inputs[] = $part;
+                }
+            }
+        } elseif (str_starts_with($arg, '--output=')) {
+            $output = substr($arg, 9);
+        } elseif (str_starts_with($arg, '--config=')) {
+            $config = substr($arg, 9);
+        } elseif (str_starts_with($arg, '--stage=')) {
+            $stage = substr($arg, 8);
+        } elseif ($arg === '-O0') {
+            $opt = 0;
+        } elseif ($arg === '-O1') {
+            $opt = 1;
+        } elseif ($arg === '-O2') {
+            $opt = 2;
+        } else {
+            $positional[] = $arg;
+        }
+    }
+
+    return [
+        'positional' => $positional,
+        'inputs' => $inputs,
+        'output' => $output,
+        'config' => $config,
+        'opt' => $opt,
+        'stage' => $stage,
+    ];
+}
+
+function removeManagedDir(string $dir): void
+{
+    if (!is_dir($dir)) {
+        return;
+    }
+    $items = scandir($dir) ?: [];
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+        $path = $dir . '/' . $item;
+        if (is_dir($path) && !is_link($path)) {
+            removeManagedDir($path);
+        } else {
+            @unlink($path);
+        }
+    }
+    @rmdir($dir);
+}
+
+/**
+ * @param array{positional: list<string>, inputs: list<string>, output: ?string, config: ?string, opt: ?int, stage: string} $parsed
+ * @return array{inputs: list<string>, output: ?string, opt: int}
+ */
+function resolveIoConfig(array $parsed): array
+{
+    $cfg = null;
+    if ($parsed['config'] !== null) {
+        $cfg = CompileConfig::fromFile($parsed['config']);
+    } elseif ($parsed['inputs'] === [] && $parsed['positional'] === [] && is_file('routir.php')) {
+        $cfg = CompileConfig::fromFile('routir.php');
+    }
+
+    $inputs = $parsed['inputs'];
+    if ($inputs === [] && isset($parsed['positional'][0]) && $parsed['positional'][0] !== '') {
+        $inputs = [$parsed['positional'][0]];
+    } elseif ($inputs === [] && $cfg !== null) {
+        $inputs = $cfg->inputs;
+    }
+
+    $output = $parsed['output'] ?? ($cfg?->outputDir);
+    $opt = $parsed['opt'] ?? ($cfg !== null ? $cfg->optimizationLevel : 2);
+
+    return ['inputs' => $inputs, 'output' => $output, 'opt' => $opt];
+}
+
+try {
+    $parsed = parseCliArgs(array_slice($argv, 2));
+
+    switch ($command) {
+        case 'build':
+            $io = resolveIoConfig($parsed);
+            if ($io['inputs'] === [] || $io['output'] === null || $io['output'] === '') {
+                fwrite(STDERR, "Usage: routir build [<routes>] [--input=PATH] --output=DIR [--config=FILE] [-O0|-O1|-O2]\n");
+                exit(1);
+            }
+            $loaded = loadRoutesFromPaths($io['inputs']);
+            $res = new Compiler()->compileToDirectory(
+                $loaded['router']->getCollection(),
+                $io['output'],
+                new CompilerOptions(optimizationLevel: $io['opt']),
+                $loaded['files'],
+            );
+            echo sprintf("Built %s (O%d) from %d file(s) -> %s\n", $res['buildId'], $io['opt'], count($loaded['files']), $res['releaseDir']);
+            exit(0);
+
+        case 'check':
+            $io = resolveIoConfig($parsed);
+            if ($io['inputs'] === []) {
+                fwrite(STDERR, "Usage: routir check [<routes>] [--input=PATH] [--config=FILE]\n");
+                exit(1);
+            }
+            $loaded = loadRoutesFromPaths($io['inputs']);
+            $compiled = new Compiler()->compileIR($loaded['router']->getCollection());
+            $warnings = $compiled['context']->diagnostics->warnings();
+            if ($warnings !== []) {
+                foreach ($warnings as $w) {
+                    fwrite(STDERR, $w->format() . "\n");
+                }
+            }
+            echo sprintf("OK: %d routes validated (%d file(s)).\n", count($compiled['hir']->routes), count($loaded['files']));
+            exit(0);
+
+        case 'list':
+            $io = resolveIoConfig($parsed);
+            if ($io['inputs'] === []) {
+                fwrite(STDERR, "Usage: routir list [<routes>] [--input=PATH] [--config=FILE]\n");
+                exit(1);
+            }
+            $loaded = loadRoutesFromPaths($io['inputs']);
+            $semantic = new SemanticAnalyzer()->analyze($loaded['router']->getCollection());
+            foreach ($semantic->routes as $r) {
+                echo sprintf(
+                    "[%d] %-16s %-32s name=%s mw=%s\n",
+                    $r->id,
+                    implode('|', $r->methods),
+                    $r->pattern,
+                    $r->name ?? '-',
+                    $r->middleware === [] ? '-' : implode(',', $r->middleware),
+                );
+            }
+            exit(0);
+
+        case 'dump:tokens':
+            $pattern = $parsed['positional'][0] ?? '';
+            if ($pattern === '') {
+                fwrite(STDERR, "Error: pattern argument required.\n");
+                exit(1);
+            }
+            $tokens = new Lexer()->tokenize($pattern);
+            foreach ($tokens as $token) {
+                echo sprintf(
+                    "%-12s %-20s [offset=%d, len=%d]\n",
+                    $token->type->value,
+                    json_encode($token->lexeme, JSON_UNESCAPED_SLASHES),
+                    $token->offset,
+                    $token->length,
+                );
+            }
+            exit(0);
+
+        case 'dump:ast':
+            $pattern = $parsed['positional'][0] ?? '';
+            if ($pattern === '') {
+                fwrite(STDERR, "Error: pattern argument required.\n");
+                exit(1);
+            }
+            $ast = new Parser()->parse($pattern);
+            echo sprintf("RouteNode(%s) [offset=%d, len=%d]\n", json_encode($ast->rawPattern, JSON_UNESCAPED_SLASHES), $ast->span->offset, $ast->span->length);
+            foreach ($ast->segments as $idx => $segment) {
+                if ($segment instanceof LiteralNode) {
+                    echo sprintf("  [%d] LiteralNode(%s) [offset=%d, len=%d]\n", $idx, json_encode($segment->value), $segment->span->offset, $segment->span->length);
+                } elseif ($segment instanceof ParameterNode) {
+                    echo sprintf(
+                        "  [%d] ParameterNode(name=%s, constraint=%s, optional=%s, wildcard=%s) [offset=%d, len=%d]\n",
+                        $idx,
+                        $segment->name,
+                        $segment->constraint ?? 'null',
+                        $segment->optional ? 'true' : 'false',
+                        $segment->wildcard ? 'true' : 'false',
+                        $segment->span->offset,
+                        $segment->span->length,
+                    );
+                }
+            }
+            exit(0);
+
+        case 'dump:ir':
+            $io = resolveIoConfig($parsed);
+            if ($io['inputs'] === []) {
+                fwrite(STDERR, "Usage: routir dump:ir [<routes>] [--input=PATH] [--stage=hir|mir|lir] [-O0|-O1|-O2]\n");
+                exit(1);
+            }
+            $loaded = loadRoutesFromPaths($io['inputs']);
+            $res = new Compiler()->compileIR($loaded['router']->getCollection(), new CompilerOptions(optimizationLevel: $io['opt']));
+            if ($parsed['stage'] === 'hir') {
+                foreach ($res['hir']->routes as $r) {
+                    echo sprintf("HIRRoute #%d %s %s name=%s\n", $r->id, implode('|', $r->methods), $r->pattern, $r->name ?? '-');
+                }
+            } elseif ($parsed['stage'] === 'mir') {
+                foreach ($res['mir']->methodCandidates as $m => $cands) {
+                    echo "MIR Method $m (" . count($cands) . " candidates)\n";
+                }
+            } else {
+                echo $res['lir']->dump();
+            }
+            exit(0);
+
+        case 'dump:code':
+            $io = resolveIoConfig($parsed);
+            if ($io['inputs'] === []) {
+                fwrite(STDERR, "Usage: routir dump:code [<routes>] [--input=PATH] [-O0|-O1|-O2]\n");
+                exit(1);
+            }
+            $loaded = loadRoutesFromPaths($io['inputs']);
+            $res = new Compiler()->compileIR($loaded['router']->getCollection(), new CompilerOptions(optimizationLevel: $io['opt']));
+            echo new PHPMatcherEmitter()->emit($res['lir']);
+            exit(0);
+
+        case 'clear':
+            $io = resolveIoConfig($parsed);
+            $outDir = $io['output'] ?? '';
+            if ($outDir === '') {
+                fwrite(STDERR, "Usage: routir clear --output=DIR [--config=FILE]\n");
+                exit(1);
+            }
+            if (is_link($outDir . '/current') || is_file($outDir . '/current')) {
+                @unlink($outDir . '/current');
+            }
+            if (is_file($outDir . '/.routir.lock')) {
+                @unlink($outDir . '/.routir.lock');
+            }
+            removeManagedDir($outDir . '/releases');
+            echo "Cleared managed artifacts in $outDir\n";
+            exit(0);
+
+        default:
+            fwrite(STDERR, sprintf("Unknown command: %s\n", $command));
+            exit(1);
+    }
+} catch (DiagnosticException $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    exit(1);
+} catch (Throwable $e) {
+    fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
+    exit(1);
+}
