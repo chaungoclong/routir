@@ -1,0 +1,18 @@
+* text=auto eol=lf
+
+/.dockerignore export-ignore
+/.gitattributes export-ignore
+/.github export-ignore
+/.gitignore export-ignore
+/AGENTS.md export-ignore
+/Dockerfile export-ignore
+/Makefile export-ignore
+/Routir-SPEC.md export-ignore
+/benchmarks export-ignore
+/composer.lock export-ignore
+/docker-compose.yml export-ignore
+/docs export-ignore
+/examples export-ignore
+/phpstan.neon export-ignore
+/phpunit.xml export-ignore
+/tests export-ignore
