@@ -175,16 +175,16 @@ route-clear: ensure-docker ## Clear compiled route artifacts (OUT=tmp/routir)
 ##@ Benchmarks & Cleanup
 
 .PHONY: bench
-bench: ensure-docker ## Run Routir internal benchmark suite
-	$(EXEC) php benchmarks/bench.php
-
-.PHONY: bench-compare
-bench-compare: ensure-docker ## Run cross-framework/library router comparison benchmark
+bench: ensure-docker ## Run cross-framework benchmark with both OPcache ON and OFF
 	@if [ ! -f benchmarks/compare/vendor/autoload.php ]; then \
 		echo "Installing benchmark comparison dependencies..."; \
 		$(EXEC) composer --working-dir=benchmarks/compare install --no-interaction; \
 	fi
-	$(EXEC) php benchmarks/compare/bench.php
+	@echo ">>> [1/2] OPcache ON (opcache.enable_cli=1)"
+	$(EXEC) php -d opcache.enable_cli=1 benchmarks/compare/bench.php
+	@echo ""
+	@echo ">>> [2/2] OPcache OFF (opcache.enable_cli=0)"
+	$(EXEC) php -d opcache.enable_cli=0 benchmarks/compare/bench.php
 
 .PHONY: clean
 clean: ## Remove temporary artifacts and tool caches

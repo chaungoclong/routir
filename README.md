@@ -232,38 +232,39 @@ php -S 127.0.0.1:8000 examples/02-compiled/server.php
 
 ## Benchmarks
 
-Run the included benchmark suite (`make bench`) or the cross-framework comparison (`make bench-compare`):
+Run the cross-framework benchmark (`make bench`, runs both OPcache ON & OFF sequentially per adapter):
 
 ```bash
-php benchmarks/bench.php
-# Cross-framework comparison (FastRoute, Symfony Routing, Laravel Routing, League Route)
-make bench-compare
+make bench
+# Or directly:
+php benchmarks/compare/bench.php --routes=100,500
 ```
 
-Measured on **PHP 8.4.22** (OPcache enabled, JIT `tracing`, 2,000 iterations after 100 warmup iterations):
+Measured on **PHP 8.4.22** (2,000 iterations after 100 warmup iterations, 500 routes, worst-case dynamic, sorted by `Dyn ops/s` descending):
 
-### Internal Suite (`make bench` — 500 routes)
-
-| Routes | Mode | Static p50 | Dynamic p50 | Miss p50 | Generated `matcher.php` |
-| --- | --- | --- | --- | --- | --- |
-| **500** | Interpreted | 0.67 µs | 53.07 µs | 57.30 µs | — |
-| **500** | Compiled `-O0` | 0.69 µs | 61.01 µs | 33.14 µs | 704,610 B |
-| **500** | Compiled `-O1` | 0.64 µs | 54.46 µs | 21.93 µs | 562,085 B |
-| **500** | Compiled `-O2` | 1.36 µs | **2.36 µs** | **1.69 µs** | **217,479 B** |
-
-### Cross-Framework Comparison (`make bench-compare` — 500 routes, worst-case dynamic)
+### OPcache ON (`opcache.enable_cli=1`, JIT `tracing`)
 
 | Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
 | --- | ---: | ---: | ---: | ---: |
-| **Routir (Compiled `-O2` match)** | 0.81 | **1.32** | **0.99** | **727,793** |
-| Symfony Routing (`Compiled`) | 0.53 | 2.24 | 1.65 | 401,178 |
-| FastRoute (`simpleDispatcher`) | 0.16 | 5.61 | 4.05 | 163,805 |
-| FastRoute (`cachedDispatcher`) | **0.14** | 6.18 | 4.53 | 147,217 |
-| Laravel Routing (`Compiled`) | 11.03 | 14.15 | 15,003.54 | 63,391 |
-| Symfony Routing (`UrlMatcher`) | 7.34 | 99.57 | 63.00 | 9,096 |
-| Laravel Routing (`RouteCollection`) | 1.93 | 244.84 | 458.63 | 3,810 |
-| **Routir (Compiled `-O2` PSR-7)** | **2.14** | **2.85** | **1.47** | **296,266** |
-| League Route (PSR-7 dispatch) | 3.47 | 10.38 | 6.00 | 88,301 |
+| **Routir (Compiled `-O2` match)** | 1.14 | **1.40** | **1.05** | **662,981** |
+| Symfony Routing (`Compiled`) | 0.30 | 2.23 | 2.05 | 367,413 |
+| **Routir (Compiled `-O2` PSR-7)** | 2.43 | 3.23 | 1.69 | 295,493 |
+| FastRoute (`simpleDispatcher`) | 0.18 | 7.27 | 4.36 | 133,670 |
+| FastRoute (`cachedDispatcher`) | **0.17** | 7.42 | 5.10 | 128,528 |
+| League Route (PSR-7 dispatch) | 3.77 | 13.19 | 7.05 | 66,795 |
+| Laravel Routing (`Compiled`) | 11.25 | 14.44 | 13,226.30 | 61,950 |
+
+### OPcache OFF (`opcache.enable_cli=0`)
+
+| Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
+| --- | ---: | ---: | ---: | ---: |
+| **Routir (Compiled `-O2` match)** | 1.28 | **2.04** | 2.34 | **416,481** |
+| Symfony Routing (`Compiled`) | 0.63 | 2.59 | 2.18 | 343,506 |
+| **Routir (Compiled `-O2` PSR-7)** | 2.44 | 3.30 | **1.76** | 291,219 |
+| League Route (PSR-7 dispatch) | 3.81 | 11.80 | 7.94 | 81,900 |
+| FastRoute (`simpleDispatcher`) | **0.42** | 11.51 | 9.29 | 81,857 |
+| FastRoute (`cachedDispatcher`) | 0.62 | 14.08 | 8.28 | 52,217 |
+| Laravel Routing (`Compiled`) | 11.81 | 15.40 | 16,582.34 | 52,193 |
 
 *(Actual numbers depend on hardware, PHP version, and OPcache/JIT configuration. See [docs/performance-notes.md](file:///home/long/Dev/router/docs/performance-notes.md) for optimization details.)*
 
@@ -295,7 +296,7 @@ Spin up a ready-to-use **PHP 8.4** development container (with OPcache, JIT, PCo
 make up          # docker compose up -d
 make install     # composer install
 make qa          # pest + phpstan + examples + route-check
-make bench       # php benchmarks/bench.php
+make bench       # cross-framework benchmarks (OPcache ON & OFF)
 make shell       # interactive bash inside dev container
 ```
 

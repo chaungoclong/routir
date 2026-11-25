@@ -37,25 +37,32 @@ Tài liệu này ghi lại các phân tích nguyên nhân gây chậm, giải ph
 - **[`CompiledRouter.php`](../src/Runtime/CompiledRouter.php)**:
   - Bỏ qua bước tạo anonymous `RequestHandlerInterface` khi `$mwList === []`, gọi thẳng `$this->handlers->invoke(...)`.
 
-### Bằng chứng (Benchmark `make bench` & `make bench-compare` — PHP 8.4.22, OPcache yes, JIT tracing)
+### Bằng chứng (Benchmark `make bench` — PHP 8.4.22, 500 routes, sorted by `Dyn ops/s` desc)
 
-**500 routes (`make bench-compare` — 1/3 static, 1/3 int param, 1/3 multi-param | worst-case dynamic index = 497):**
+**1. OPcache ON (`opcache.enable_cli=1`, JIT `tracing`):**
 
 | Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
 | --- | ---: | ---: | ---: | ---: |
 | Routir `-O2` (trước tối ưu) | 1.13 | 37.05 | 1.30 | 24,741 |
-| **Routir `-O2` (sau tối ưu)** | **0.81** | **1.32** | **0.99** | **727,793** |
-| Symfony Routing (`Compiled`) | 0.53 | 2.24 | 1.65 | 401,178 |
-| FastRoute (`simpleDispatcher`) | 0.16 | 5.61 | 4.05 | 163,805 |
-| FastRoute (`cachedDispatcher`) | 0.14 | 6.18 | 4.53 | 147,217 |
-| Laravel Routing (`Compiled`) | 11.03 | 14.15 | 15,003.54 | 63,391 |
+| **Routir (Compiled `-O2` match)** | 1.14 | **1.40** | **1.05** | **662,981** |
+| Symfony Routing (`Compiled`) | 0.30 | 2.23 | 2.05 | 367,413 |
+| **Routir (Compiled `-O2` PSR-7)** | 2.43 | 3.23 | 1.69 | 295,493 |
+| FastRoute (`simpleDispatcher`) | 0.18 | 7.27 | 4.36 | 133,670 |
+| FastRoute (`cachedDispatcher`) | **0.17** | 7.42 | 5.10 | 128,528 |
+| League Route (PSR-7 dispatch) | 3.77 | 13.19 | 7.05 | 66,795 |
+| Laravel Routing (`Compiled`) | 11.25 | 14.44 | 13,226.30 | 61,950 |
 
-**Full PSR-7 Dispatch (500 routes):**
-- `Routir (Compiled -O2 PSR-7)`: Static **2.14 µs** | Dyn p50 **2.85 µs** | Miss p50 **1.47 µs** | **296,266 ops/s**
-- `League Route (PSR-7 dispatch)`: Static **3.47 µs** | Dyn p50 **10.38 µs** | Miss p50 **6.00 µs** | **88,301 ops/s**
+**2. OPcache OFF (`opcache.enable_cli=0`):**
 
-**Internal Suite (`make bench` — 500 routes):**
-- `Compiled -O2`: Dynamic p50 **2.36 µs** | Miss p50 **1.69 µs** | Generated `matcher.php` **217,479 B** (giảm từ 327,551 B trước đây).
+| Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
+| --- | ---: | ---: | ---: | ---: |
+| **Routir (Compiled `-O2` match)** | 1.28 | **2.04** | 2.34 | **416,481** |
+| Symfony Routing (`Compiled`) | 0.63 | 2.59 | 2.18 | 343,506 |
+| **Routir (Compiled `-O2` PSR-7)** | 2.44 | 3.30 | **1.76** | 291,219 |
+| League Route (PSR-7 dispatch) | 3.81 | 11.80 | 7.94 | 81,900 |
+| FastRoute (`simpleDispatcher`) | **0.42** | 11.51 | 9.29 | 81,857 |
+| FastRoute (`cachedDispatcher`) | 0.62 | 14.08 | 8.28 | 52,217 |
+| Laravel Routing (`Compiled`) | 11.81 | 15.40 | 16,582.34 | 52,193 |
 
 Kiểm chứng parity & chất lượng: `make qa` pass **86 tests (1901 assertions)** (bao gồm Differential O0/O1/O2, Golden, Fuzz) và **PHPStan Level 9 (0 errors)**.
 
