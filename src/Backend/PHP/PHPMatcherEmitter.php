@@ -59,26 +59,54 @@ final class PHPMatcherEmitter
         }
 
         // Emit match() entrypoint
+        $code .= "    public function match(string \$method, string \$requestTarget): MatchResult\n    {\n";
+        if ($module->staticTables !== []) {
+            $code .= "        if (isset(self::STATIC_TABLES[\$method][\$requestTarget]) && !str_contains(\$requestTarget, '%')) {\n";
+            $code .= "            \$hit = self::STATIC_TABLES[\$method][\$requestTarget];\n";
+            $code .= "            return new MatchResult(status: MatchStatus::Found, routeId: \$hit['id'], params: \$hit['defaults']);\n";
+            $code .= "        }\n\n";
+        }
         $code .= <<<'PHP'
-    public function match(string $method, string $requestTarget): MatchResult
-    {
-        try {
-            $segments = PathNormalizer::normalize($requestTarget);
-        } catch (InvalidRequestTargetException $e) {
-            return new MatchResult(
-                status: MatchStatus::InvalidRequestTarget,
-                errorReason: $e->getMessage(),
-            );
+        if ($requestTarget === '/') {
+            $segments = [];
+            $rawPath = '/';
+        } elseif (
+            $requestTarget !== ''
+            && $requestTarget[0] === '/'
+            && strlen($requestTarget) === strspn($requestTarget, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_-.~')
+            && !str_contains($requestTarget, '/.')
+        ) {
+            $segments = explode('/', substr($requestTarget, 1));
+            $rawPath = $requestTarget;
+        } else {
+            try {
+                $segments = PathNormalizer::normalize($requestTarget);
+            } catch (InvalidRequestTargetException $e) {
+                return new MatchResult(
+                    status: MatchStatus::InvalidRequestTarget,
+                    errorReason: $e->getMessage(),
+                );
+            }
+            $rawPath = $segments === [] ? '/' : '/' . implode('/', $segments);
         }
 
         $segCount = count($segments);
-        $rawPath = $segCount === 0
-            ? '/'
-            : ((!str_contains($requestTarget, '%') && !str_contains($requestTarget, '?') && !str_contains($requestTarget, '#'))
-                ? $requestTarget
-                : '/' . implode('/', $segments));
-
-        $direct = $this->dispatchMethod($method, $segments, $segCount, $rawPath);
+PHP;
+        if ($module->staticTables !== []) {
+            $code .= "\n        if (\$rawPath !== \$requestTarget && isset(self::STATIC_TABLES[\$method][\$rawPath])) {\n";
+            $code .= "            \$hit = self::STATIC_TABLES[\$method][\$rawPath];\n";
+            $code .= "            return new MatchResult(status: MatchStatus::Found, routeId: \$hit['id'], params: \$hit['defaults']);\n";
+            $code .= "        }\n";
+        }
+        $code .= "\n        \$direct = match (\$method) {\n";
+        foreach ($methods as $m) {
+            $fnName = $this->methodFunctionName($m);
+            $mExport = var_export($m, true);
+            $code .= "            {$mExport} => \$this->{$fnName}(\$segments, \$segCount),\n";
+        }
+        $code .= "            default => null,\n";
+        $code .= "        };\n";
+        $code .= <<<'PHP'
         if ($direct !== null) {
             return $direct;
         }
@@ -206,10 +234,22 @@ PHP;
         $code .= "        \$captures = [];\n";
         $code .= "        goto {$fn->entryLabel};\n\n";
 
-        foreach ($fn->blocks as $label => $block) {
+        $labels = array_keys($fn->blocks);
+        $labelCount = count($labels);
+        foreach ($labels as $idx => $label) {
+            $block = $fn->blocks[$label];
+            $nextLabel = $labels[$idx + 1] ?? null;
             $code .= "        {$label}:\n";
-            foreach ($block->instructions as $instr) {
-                $code .= $this->emitInstruction($instr);
+
+            $instrs = $block->instructions;
+            $folded = $this->tryEmitFoldedReturnMatch($instrs);
+            if ($folded !== null) {
+                $code .= $folded . "\n";
+                continue;
+            }
+
+            foreach ($instrs as $instr) {
+                $code .= $this->emitInstruction($instr, $nextLabel);
             }
             $code .= "\n";
         }
@@ -220,40 +260,81 @@ PHP;
     }
 
     /**
+     * Fold `[ResetCaptures, Capture..., ReturnMatch]` into a single literal-array MatchResult return.
+     *
+     * @param list<object> $instrs Block instructions.
+     *
+     * @return ?string Folded PHP return statement, or null if not applicable.
+     */
+    private function tryEmitFoldedReturnMatch(array $instrs): ?string
+    {
+        $count = count($instrs);
+        if ($count < 2 || !($instrs[0] instanceof ResetCaptures) || !($instrs[$count - 1] instanceof ReturnMatch)) {
+            return null;
+        }
+
+        $pairs = [];
+        for ($i = 1; $i < $count - 1; $i++) {
+            $instr = $instrs[$i];
+            if (!$instr instanceof Capture) {
+                return null;
+            }
+            $pairs[] = var_export($instr->paramName, true) . ' => ' . $instr->sourceVar;
+        }
+
+        /** @var ReturnMatch $ret */
+        $ret = $instrs[$count - 1];
+        $paramsExpr = '[' . implode(', ', $pairs) . ']';
+        if ($ret->defaults !== []) {
+            $paramsExpr .= ' + ' . var_export($ret->defaults, true);
+        }
+
+        return sprintf(
+            "        return new MatchResult(status: MatchStatus::Found, routeId: %d, params: %s);\n",
+            $ret->routeId,
+            $paramsExpr,
+        );
+    }
+
+    /**
      * Emit PHP code for a single LIR instruction.
      *
      * @param object $instr LIR instruction instance.
+     * @param ?string $fallthroughLabel Immediately following block label, if any.
      *
      * @return string Generated PHP statements.
      *
      * @throws LogicException When an unknown LIR instruction is encountered.
      */
-    private function emitInstruction(object $instr): string
+    private function emitInstruction(object $instr, ?string $fallthroughLabel = null): string
     {
         if ($instr instanceof ResetCaptures) {
             return "        \$captures = [];\n";
         }
 
         if ($instr instanceof ReadSegment) {
+            $jump = $instr->onPresent === $fallthroughLabel ? '' : "        goto {$instr->onPresent};\n";
+
             return sprintf(
-                "        if (!isset(\$segments[%d])) { goto %s; }\n        %s = \$segments[%d];\n        goto %s;\n",
+                "        if (!isset(\$segments[%d])) { goto %s; }\n        %s = \$segments[%d];\n%s",
                 $instr->index,
                 $instr->onMissing,
                 $instr->targetVar,
                 $instr->index,
-                $instr->onPresent,
+                $jump,
             );
         }
 
         if ($instr instanceof GuardLiteral) {
             $exp = var_export($instr->expected, true);
+            $jump = $instr->onFail === $fallthroughLabel ? '' : "        goto {$instr->onFail};\n";
 
             return sprintf(
-                "        if (%s === %s) { goto %s; }\n        goto %s;\n",
+                "        if (%s === %s) { goto %s; }\n%s",
                 $instr->var,
                 $exp,
                 $instr->onMatch,
-                $instr->onFail,
+                $jump,
             );
         }
 
