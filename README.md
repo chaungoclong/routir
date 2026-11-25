@@ -6,6 +6,7 @@
 
 > **Compile once, execute many, reset every request.**
 
+[![CI](https://github.com/chaungoclong/routir/actions/workflows/ci.yml/badge.svg)](https://github.com/chaungoclong/routir/actions/workflows/ci.yml)
 [![PHP Version](https://img.shields.io/badge/PHP-8.4%2B-777BB4?logo=php&logoColor=white)](https://www.php.net/)
 [![PHPStan](https://img.shields.io/badge/PHPStan-Level%209-brightgreen)](https://phpstan.org/)
 [![Tests](https://img.shields.io/badge/Tests-Pest%203-F55247)](https://pestphp.com/)

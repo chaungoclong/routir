@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (PHP ${{ matrix.php }} / ${{ matrix.stability }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4']
+        stability: ['lowest', 'stable']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, ctype, pcntl
+          coverage: pcov
+          tools: composer:v2
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php-${{ matrix.php }}-${{ matrix.stability }}-${{ hashFiles('composer.json', 'composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php-${{ matrix.php }}-${{ matrix.stability }}-
+            ${{ runner.os }}-php-${{ matrix.php }}-
+
+      - name: Install dependencies (${{ matrix.stability }})
+        run: |
+          if [ "${{ matrix.stability }}" = "lowest" ]; then
+            composer update --prefer-lowest --prefer-dist --no-interaction --no-progress
+          else
+            composer install --prefer-dist --no-interaction --no-progress
+          fi
+
+      - name: Run Pest test suite (OPcache ON)
+        run: php -d opcache.enable_cli=1 vendor/bin/pest
+
+      - name: Run Pest test suite (OPcache OFF)
+        run: php -d opcache.enable_cli=0 vendor/bin/pest
+
+  static-analysis:
+    name: Static Analysis & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, ctype
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate composer.json
+        run: composer validate --no-check-lock --strict
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php-8.4-stable-${{ hashFiles('composer.json', 'composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php-8.4-stable-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run PHP syntax check
+        run: |
+          find src tests examples -name "*.php" -print0 | xargs -0 -n1 -P4 php -l -n >/dev/null
+          php -l -n bin/routir >/dev/null
+
+      - name: Run PHPStan (Level 9)
+        run: vendor/bin/phpstan analyse --no-progress
+
+  examples-and-cli:
+    name: Examples & CLI Smoke Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, ctype, pcntl
+          coverage: none
+          tools: composer:v2
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php-8.4-stable-${{ hashFiles('composer.json', 'composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php-8.4-stable-
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run CLI examples
+        run: |
+          php examples/01-interpreted/run.php
+          php examples/02-compiled/run.php
+
+      - name: Verify CLI commands
+        run: |
+          php bin/routir check examples/routes.php
+          php bin/routir list examples/routes.php
+
+  benchmark-smoke:
+    name: Benchmark Suite Smoke Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, ctype
+          coverage: none
+          tools: composer:v2
+
+      - name: Install benchmark dependencies
+        run: composer --working-dir=benchmarks/compare install --prefer-dist --no-interaction --no-progress
+
+      - name: Run benchmark smoke check
+        run: php benchmarks/compare/bench.php --routes=100 --iterations=10 --warmup=1 --only=routir-compiled-o2
