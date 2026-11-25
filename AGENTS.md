@@ -76,16 +76,16 @@ public function compile(CompileConfig $config): array
   2. Thực hiện chỉnh sửa gọn, không lặp logic.
   3. **Bắt buộc test lại sau khi sửa xong**: luôn chạy lại toàn bộ kiểm tra bên dưới sau lần chỉnh sửa cuối cùng trước khi báo cáo kết quả cho người dùng.
 - **Framework test**: Sử dụng **Pest** (`tests/`), viết test bằng `test(...)` / `it(...)`, `expect(...)`, và `->with(...)` cho datasets. Không viết class PHPUnit truyền thống cho test mới.
-- **Kiểm tra bắt buộc trước khi kết thúc task**:
-  1. Chạy toàn bộ test suite:
+- **Kiểm tra bắt buộc trước khi kết thúc task** (có thể chạy nhanh toàn bộ 3 bước qua `make qa`, tự động dùng PHP 8.4+ trên host hoặc Docker `dev` container; ép thủ công bằng `DOCKER=0|1`):
+  1. Chạy toàn bộ test suite (`make test`):
      ```bash
      vendor/bin/pest
      ```
-  2. Chạy kiểm tra kiểu tĩnh PHPStan level 9 (0 errors):
+  2. Chạy kiểm tra kiểu tĩnh PHPStan level 9 (`make phpstan`, 0 errors):
      ```bash
      vendor/bin/phpstan analyse --no-progress
      ```
-  3. Nếu thay đổi liên quan đến compiler, runtime hoặc examples, chạy kiểm chứng:
+  3. Nếu thay đổi liên quan đến compiler, runtime hoặc examples, chạy kiểm chứng (`make examples && make route-check`):
      ```bash
      php examples/01-interpreted/run.php
      php examples/02-compiled/run.php

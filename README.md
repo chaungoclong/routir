@@ -219,11 +219,11 @@ Registration DSL ─▶ RouteLoader ─▶ Lexer ─▶ Parser ─▶ AST
 Both examples share [examples/routes.php](file:///home/long/Dev/router/examples/routes.php) and [examples/bootstrap.php](file:///home/long/Dev/router/examples/bootstrap.php), demonstrating all HTTP methods (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, `HEAD`, `match`, `any`), handler types (arrow functions, scalar-capturing closures, DI controllers, invokable classes), PSR-15 middleware, and a custom JSON `ResponseAdapterInterface`:
 
 ```bash
-# CLI runs
+# CLI runs (or: make examples)
 php examples/01-interpreted/run.php
 php examples/02-compiled/run.php   # emits artifacts to tmp/example-compiled/
 
-# PHP built-in HTTP server
+# PHP built-in HTTP server (or: make serve-interpreted / make serve-compiled)
 php -S 127.0.0.1:8000 examples/01-interpreted/server.php
 php -S 127.0.0.1:8000 examples/02-compiled/server.php
 ```
@@ -232,7 +232,7 @@ php -S 127.0.0.1:8000 examples/02-compiled/server.php
 
 ## Benchmarks
 
-Run the included benchmark suite:
+Run the included benchmark suite (`make bench` or directly):
 
 ```bash
 php benchmarks/bench.php
@@ -254,12 +254,18 @@ Measured on **PHP 8.4.26** (OPcache disabled, 2,000 iterations after 100 warmup 
 ## Testing & Quality Gates
 
 ```bash
-# Run full Pest suite (Unit, Integration, Built-in Server, Differential O0/O1/O2, Golden, Fuzz)
-vendor/bin/pest
+# Run all quality gates via Makefile (auto-detects local PHP 8.4+ or Docker dev container)
+make qa
 
-# Run PHPStan static analysis (Level 9)
-vendor/bin/phpstan analyse --no-progress
+# Or run individual commands:
+# Full Pest suite (Unit, Integration, Differential O0/O1/O2, Golden, Fuzz)
+vendor/bin/pest            # make test
+
+# PHPStan static analysis (Level 9)
+vendor/bin/phpstan analyse --no-progress   # make phpstan
 ```
+
+Run `make help` to see all available DX targets (`test-unit`, `test-diff`, `coverage`, `lint`, `route-check`, `clean`, etc.).
 
 ---
 
@@ -268,18 +274,14 @@ vendor/bin/phpstan analyse --no-progress
 Spin up a ready-to-use **PHP 8.4** development container (with OPcache, JIT, PCov, and Composer 2):
 
 ```bash
-docker compose up -d --build
-docker compose exec dev composer install
-docker compose exec dev vendor/bin/pest
-docker compose exec dev vendor/bin/phpstan analyse --no-progress
-docker compose exec dev php benchmarks/bench.php
+make up          # docker compose up -d
+make install     # composer install
+make qa          # pest + phpstan + examples + route-check
+make bench       # php benchmarks/bench.php
+make shell       # interactive bash inside dev container
 ```
 
-Open an interactive shell inside the container:
-
-```bash
-docker compose exec dev bash
-```
+All `Makefile` targets auto-detect whether PHP 8.4+ is available locally (`DOCKER=0`) or fall back to `docker compose exec -T dev` (`DOCKER=1`). You can override this anytime with `make <target> DOCKER=0` or `DOCKER=1`.
 
 ---
 
@@ -307,7 +309,7 @@ Contributions are warmly welcomed! Whether you are fixing a bug, adding an optim
    - Keep `src/Runtime/`, `src/Middleware/`, `src/Contracts/`, and `src/Exception/` free of compiler/AST dependencies.
    - Maintain 100% observable parity between **Interpreted** and **Compiled** (`-O0`, `-O1`, `-O2`) modes.
 3. **Add tests** using **Pest** (`tests/`) covering both happy paths and edge cases.
-4. **Verify all quality gates** pass before opening a Pull Request:
+4. **Verify all quality gates** pass before opening a Pull Request (`make qa`, or run individually):
    ```bash
    vendor/bin/pest
    vendor/bin/phpstan analyse --no-progress

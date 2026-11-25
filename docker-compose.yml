@@ -11,6 +11,8 @@ services:
       - .:/app
       - composer-cache:/home/dev/.composer/cache
     tty: true
+    ports:
+      - "8000:8000"
     stdin_open: true
     command: ["sleep", "infinity"]
 

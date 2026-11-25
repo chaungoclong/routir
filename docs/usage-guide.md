@@ -7,10 +7,10 @@ Yêu cầu **PHP 8.4+** và **Composer 2**.
 composer install
 ```
 
-Hoặc dùng Docker để khởi tạo môi trường dev ngay:
+Hoặc dùng Docker + `Makefile` để khởi tạo môi trường dev ngay:
 ```bash
-docker compose up -d --build
-docker compose exec dev composer install
+make up
+make install
 ```
 
 ---
@@ -152,6 +152,12 @@ Mặc định `DefaultResponseAdapter` nhận `ResponseInterface` hoặc `string
 ## 6. Chạy thử bộ Examples
 Cả 2 example dùng chung [examples/routes.php](file:///home/long/Dev/router/examples/routes.php):
 ```bash
+make examples
+# Hoặc chạy trực tiếp:
 php examples/01-interpreted/run.php
 php examples/02-compiled/run.php
+
+# Khởi chạy HTTP server thử nghiệm:
+make serve-interpreted
+make serve-compiled
 ```
