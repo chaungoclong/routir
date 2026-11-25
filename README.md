@@ -232,22 +232,40 @@ php -S 127.0.0.1:8000 examples/02-compiled/server.php
 
 ## Benchmarks
 
-Run the included benchmark suite (`make bench` or directly):
+Run the included benchmark suite (`make bench`) or the cross-framework comparison (`make bench-compare`):
 
 ```bash
 php benchmarks/bench.php
+# Cross-framework comparison (FastRoute, Symfony Routing, Laravel Routing, League Route)
+make bench-compare
 ```
 
-Measured on **PHP 8.4.26** (OPcache disabled, 2,000 iterations after 100 warmup iterations):
+Measured on **PHP 8.4.22** (OPcache enabled, JIT `tracing`, 2,000 iterations after 100 warmup iterations):
+
+### Internal Suite (`make bench` — 500 routes)
 
 | Routes | Mode | Static p50 | Dynamic p50 | Miss p50 | Generated `matcher.php` |
 | --- | --- | --- | --- | --- | --- |
-| **500** | Interpreted | 4.42 µs | 798.51 µs | 423.84 µs | — |
-| **500** | Compiled `-O0` | 3.79 µs | 414.04 µs | 119.31 µs | 691,293 B |
-| **500** | Compiled `-O1` | 3.50 µs | 370.92 µs | 80.39 µs | 548,768 B |
-| **500** | Compiled `-O2` | **3.60 µs** | **210.81 µs** | **4.41 µs** | **327,551 B** |
+| **500** | Interpreted | 0.67 µs | 53.07 µs | 57.30 µs | — |
+| **500** | Compiled `-O0` | 0.69 µs | 61.01 µs | 33.14 µs | 704,610 B |
+| **500** | Compiled `-O1` | 0.64 µs | 54.46 µs | 21.93 µs | 562,085 B |
+| **500** | Compiled `-O2` | 1.36 µs | **2.36 µs** | **1.69 µs** | **217,479 B** |
 
-*(Actual numbers depend on hardware, PHP version, and OPcache/JIT configuration.)*
+### Cross-Framework Comparison (`make bench-compare` — 500 routes, worst-case dynamic)
+
+| Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
+| --- | ---: | ---: | ---: | ---: |
+| **Routir (Compiled `-O2` match)** | 0.81 | **1.32** | **0.99** | **727,793** |
+| Symfony Routing (`Compiled`) | 0.53 | 2.24 | 1.65 | 401,178 |
+| FastRoute (`simpleDispatcher`) | 0.16 | 5.61 | 4.05 | 163,805 |
+| FastRoute (`cachedDispatcher`) | **0.14** | 6.18 | 4.53 | 147,217 |
+| Laravel Routing (`Compiled`) | 11.03 | 14.15 | 15,003.54 | 63,391 |
+| Symfony Routing (`UrlMatcher`) | 7.34 | 99.57 | 63.00 | 9,096 |
+| Laravel Routing (`RouteCollection`) | 1.93 | 244.84 | 458.63 | 3,810 |
+| **Routir (Compiled `-O2` PSR-7)** | **2.14** | **2.85** | **1.47** | **296,266** |
+| League Route (PSR-7 dispatch) | 3.47 | 10.38 | 6.00 | 88,301 |
+
+*(Actual numbers depend on hardware, PHP version, and OPcache/JIT configuration. See [docs/performance-notes.md](file:///home/long/Dev/router/docs/performance-notes.md) for optimization details.)*
 
 ---
 

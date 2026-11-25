@@ -37,21 +37,25 @@ Tài liệu này ghi lại các phân tích nguyên nhân gây chậm, giải ph
 - **[`CompiledRouter.php`](../src/Runtime/CompiledRouter.php)**:
   - Bỏ qua bước tạo anonymous `RequestHandlerInterface` khi `$mwList === []`, gọi thẳng `$this->handlers->invoke(...)`.
 
-### Bằng chứng (Benchmark `make bench-compare` — PHP 8.4.22, OPcache yes, JIT tracing)
+### Bằng chứng (Benchmark `make bench` & `make bench-compare` — PHP 8.4.22, OPcache yes, JIT tracing)
 
-**500 routes (1/3 static, 1/3 int param, 1/3 multi-param | worst-case dynamic index = 497):**
+**500 routes (`make bench-compare` — 1/3 static, 1/3 int param, 1/3 multi-param | worst-case dynamic index = 497):**
 
 | Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
 | --- | ---: | ---: | ---: | ---: |
 | Routir `-O2` (trước tối ưu) | 1.13 | 37.05 | 1.30 | 24,741 |
-| **Routir `-O2` (sau tối ưu)** | **0.61** | **0.97** | **0.76** | **995,066** |
-| FastRoute (`cachedDispatcher`) | 0.11 | 4.58 | 3.20 | 197,941 |
-| Symfony Routing (`Compiled`) | 0.53 | 2.11 | 1.57 | 362,485 |
-| Laravel Routing (`Compiled`) | 11.26 | 14.45 | 15,030.79 | 58,607 |
+| **Routir `-O2` (sau tối ưu)** | **0.81** | **1.32** | **0.99** | **727,793** |
+| Symfony Routing (`Compiled`) | 0.53 | 2.24 | 1.65 | 401,178 |
+| FastRoute (`simpleDispatcher`) | 0.16 | 5.61 | 4.05 | 163,805 |
+| FastRoute (`cachedDispatcher`) | 0.14 | 6.18 | 4.53 | 147,217 |
+| Laravel Routing (`Compiled`) | 11.03 | 14.15 | 15,003.54 | 63,391 |
 
 **Full PSR-7 Dispatch (500 routes):**
-- `Routir (Compiled -O2 PSR-7)`: Static **3.00 µs** | Dyn p50 **3.87 µs** | Miss p50 **2.02 µs** | **240,087 ops/s**
-- `League Route (PSR-7 dispatch)`: Static **4.84 µs** | Dyn p50 **15.63 µs** | Miss p50 **9.96 µs** | **47,940 ops/s**
+- `Routir (Compiled -O2 PSR-7)`: Static **2.14 µs** | Dyn p50 **2.85 µs** | Miss p50 **1.47 µs** | **296,266 ops/s**
+- `League Route (PSR-7 dispatch)`: Static **3.47 µs** | Dyn p50 **10.38 µs** | Miss p50 **6.00 µs** | **88,301 ops/s**
+
+**Internal Suite (`make bench` — 500 routes):**
+- `Compiled -O2`: Dynamic p50 **2.36 µs** | Miss p50 **1.69 µs** | Generated `matcher.php` **217,479 B** (giảm từ 327,551 B trước đây).
 
 Kiểm chứng parity & chất lượng: `make qa` pass **86 tests (1901 assertions)** (bao gồm Differential O0/O1/O2, Golden, Fuzz) và **PHPStan Level 9 (0 errors)**.
 
