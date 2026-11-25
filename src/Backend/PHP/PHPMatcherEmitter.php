@@ -22,6 +22,10 @@ use Routir\Semantic\NormalizedConstraint;
 
 final class PHPMatcherEmitter
 {
+    private const int MAX_SPECIALIZED_BLOCKS = 512;
+
+    private const int MAX_SPECIALIZED_SEGMENT_COUNTS = 3;
+
     /** @var list<string> */
     private const array METHOD_ORDER = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'];
 
@@ -73,7 +77,8 @@ final class PHPMatcherEmitter
         } elseif (
             $requestTarget !== ''
             && $requestTarget[0] === '/'
-            && strlen($requestTarget) === strspn($requestTarget, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_-.~')
+            && ctype_print($requestTarget)
+            && strpbrk($requestTarget, '%?#\\') === false
             && !str_contains($requestTarget, '/.')
         ) {
             $segments = explode('/', substr($requestTarget, 1));
@@ -231,15 +236,66 @@ PHP;
         $fnName = $this->methodFunctionName($method);
         $code = "\n    /**\n     * @param list<string> \$segments\n     */\n";
         $code .= "    private function {$fnName}(array \$segments, int \$segCount): ?MatchResult\n    {\n";
-        $code .= "        \$captures = [];\n";
-        $code .= "        goto {$fn->entryLabel};\n\n";
 
-        $labels = array_keys($fn->blocks);
-        $labelCount = count($labels);
+        if ($this->needsCaptureAccumulator($fn)) {
+            $code .= "        \$captures = [];\n";
+        }
+
+        $segmentCounts = $this->specializedSegmentCounts($fn);
+        if ($segmentCounts !== []) {
+            $code .= "        switch (\$segCount) {\n";
+            foreach ($segmentCounts as $segmentCount) {
+                $code .= "            case {$segmentCount}: goto sc{$segmentCount}_{$fn->entryLabel};\n";
+            }
+            $code .= "            default: return null;\n";
+            $code .= "        }\n\n";
+
+            foreach ($segmentCounts as $segmentCount) {
+                $code .= $this->emitFunctionBlocks(
+                    fn: $fn,
+                    knownSegmentCount: $segmentCount,
+                    labelPrefix: "sc{$segmentCount}_",
+                    reachableLabels: $this->reachableLabels($fn, $segmentCount),
+                );
+            }
+        } else {
+            $code .= "        goto {$fn->entryLabel};\n\n";
+            $code .= $this->emitFunctionBlocks($fn);
+        }
+
+        $code .= "    }\n";
+
+        return $code;
+    }
+
+    /**
+     * Emit the selected basic blocks for a generated matcher method.
+     *
+     * @param LIRFunction $fn Function whose blocks are emitted.
+     * @param int|null $knownSegmentCount Compile-time segment count for a specialized lane.
+     * @param string $labelPrefix Prefix applied to labels in a specialized lane.
+     * @param array<string, true>|null $reachableLabels Reachable block set, or null for every block.
+     *
+     * @return string Generated PHP basic blocks.
+     *
+     * @throws LogicException When an unknown LIR instruction is encountered.
+     */
+    private function emitFunctionBlocks(
+        LIRFunction $fn,
+        ?int $knownSegmentCount = null,
+        string $labelPrefix = '',
+        ?array $reachableLabels = null,
+    ): string {
+        $code = '';
+        $labels = array_values(array_filter(
+            array_keys($fn->blocks),
+            static fn (string $label): bool => $reachableLabels === null || isset($reachableLabels[$label]),
+        ));
+
         foreach ($labels as $idx => $label) {
             $block = $fn->blocks[$label];
             $nextLabel = $labels[$idx + 1] ?? null;
-            $code .= "        {$label}:\n";
+            $code .= "        {$labelPrefix}{$label}:\n";
 
             $instrs = $block->instructions;
             $folded = $this->tryEmitFoldedReturnMatch($instrs);
@@ -249,14 +305,130 @@ PHP;
             }
 
             foreach ($instrs as $instr) {
-                $code .= $this->emitInstruction($instr, $nextLabel);
+                $code .= $this->emitInstruction(
+                    instr: $instr,
+                    fallthroughLabel: $nextLabel,
+                    knownSegmentCount: $knownSegmentCount,
+                    labelPrefix: $labelPrefix,
+                );
             }
             $code .= "\n";
         }
 
-        $code .= "    }\n";
-
         return $code;
+    }
+
+    /**
+     * Determine whether a matcher function still needs a mutable capture array.
+     *
+     * @param LIRFunction $fn Function to inspect.
+     *
+     * @return bool True when at least one non-folded block uses the capture accumulator.
+     */
+    private function needsCaptureAccumulator(LIRFunction $fn): bool
+    {
+        foreach ($fn->blocks as $block) {
+            if ($this->tryEmitFoldedReturnMatch($block->instructions) !== null) {
+                continue;
+            }
+
+            foreach ($block->instructions as $instr) {
+                if (
+                    $instr instanceof ResetCaptures
+                    || $instr instanceof Capture
+                    || $instr instanceof CaptureWildcard
+                    || $instr instanceof ReturnMatch
+                ) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Select exact segment counts suitable for O2 partial evaluation.
+     *
+     * @param LIRFunction $fn Function to inspect.
+     *
+     * @return list<int> Sorted exact segment counts, or an empty list when specialization is unsafe.
+     */
+    private function specializedSegmentCounts(LIRFunction $fn): array
+    {
+        if (!$fn->specializeSegmentCounts || count($fn->blocks) > self::MAX_SPECIALIZED_BLOCKS) {
+            return [];
+        }
+
+        $counts = [];
+        foreach ($fn->blocks as $block) {
+            foreach ($block->instructions as $instr) {
+                if ($instr instanceof CaptureWildcard) {
+                    return [];
+                }
+                if ($instr instanceof BranchEOF && $instr->segmentCount >= 0) {
+                    $counts[$instr->segmentCount] = true;
+                }
+            }
+        }
+
+        if ($counts === [] || count($counts) > self::MAX_SPECIALIZED_SEGMENT_COUNTS) {
+            return [];
+        }
+
+        $segmentCounts = array_keys($counts);
+        sort($segmentCounts);
+
+        return $segmentCounts;
+    }
+
+    /**
+     * Resolve blocks reachable when the request segment count is known at compile time.
+     *
+     * @param LIRFunction $fn Function to traverse.
+     * @param int $segmentCount Specialized request segment count.
+     *
+     * @return array<string, true> Reachable block labels.
+     */
+    private function reachableLabels(LIRFunction $fn, int $segmentCount): array
+    {
+        $reachable = [];
+        $pending = [$fn->entryLabel];
+
+        while ($pending !== []) {
+            $label = array_pop($pending);
+            if (isset($reachable[$label]) || !isset($fn->blocks[$label])) {
+                continue;
+            }
+
+            $reachable[$label] = true;
+            foreach ($fn->blocks[$label]->instructions as $instr) {
+                $targets = match (true) {
+                    $instr instanceof ReadSegment => [
+                        $instr->index < $segmentCount ? $instr->onPresent : $instr->onMissing,
+                    ],
+                    $instr instanceof BranchEOF => [
+                        $instr->segmentCount === $segmentCount ? $instr->onEof : $instr->onMore,
+                    ],
+                    $instr instanceof GuardLiteral,
+                    $instr instanceof GuardConstraint => [$instr->onMatch, $instr->onFail],
+                    $instr instanceof SwitchLiteral => [...array_values($instr->cases), $instr->default],
+                    $instr instanceof Jump => [$instr->target],
+                    default => [],
+                };
+
+                if ($targets !== []) {
+                    array_push($pending, ...$targets);
+                    break;
+                }
+
+                if ($instr instanceof ReturnMatch || $instr instanceof ReturnMiss) {
+                    break;
+                }
+            }
+        }
+
+        return $reachable;
     }
 
     /**
@@ -306,18 +478,38 @@ PHP;
      *
      * @throws LogicException When an unknown LIR instruction is encountered.
      */
-    private function emitInstruction(object $instr, ?string $fallthroughLabel = null): string
+    private function emitInstruction(
+        object $instr,
+        ?string $fallthroughLabel = null,
+        ?int $knownSegmentCount = null,
+        string $labelPrefix = '',
+    ): string
     {
         if ($instr instanceof ResetCaptures) {
             return "        \$captures = [];\n";
         }
 
         if ($instr instanceof ReadSegment) {
-            $jump = $instr->onPresent === $fallthroughLabel ? '' : "        goto {$instr->onPresent};\n";
+            if ($knownSegmentCount !== null) {
+                if ($instr->index >= $knownSegmentCount) {
+                    return $instr->onMissing === $fallthroughLabel
+                        ? ''
+                        : "        goto {$labelPrefix}{$instr->onMissing};\n";
+                }
+
+                $jump = $instr->onPresent === $fallthroughLabel
+                    ? ''
+                    : "        goto {$labelPrefix}{$instr->onPresent};\n";
+
+                return sprintf("        %s = \$segments[%d];\n%s", $instr->targetVar, $instr->index, $jump);
+            }
+
+            $jump = $instr->onPresent === $fallthroughLabel ? '' : "        goto {$labelPrefix}{$instr->onPresent};\n";
 
             return sprintf(
-                "        if (!isset(\$segments[%d])) { goto %s; }\n        %s = \$segments[%d];\n%s",
+                "        if (!isset(\$segments[%d])) { goto %s%s; }\n        %s = \$segments[%d];\n%s",
                 $instr->index,
+                $labelPrefix,
                 $instr->onMissing,
                 $instr->targetVar,
                 $instr->index,
@@ -327,12 +519,13 @@ PHP;
 
         if ($instr instanceof GuardLiteral) {
             $exp = var_export($instr->expected, true);
-            $jump = $instr->onFail === $fallthroughLabel ? '' : "        goto {$instr->onFail};\n";
+            $jump = $instr->onFail === $fallthroughLabel ? '' : "        goto {$labelPrefix}{$instr->onFail};\n";
 
             return sprintf(
-                "        if (%s === %s) { goto %s; }\n%s",
+                "        if (%s === %s) { goto %s%s; }\n%s",
                 $instr->var,
                 $exp,
+                $labelPrefix,
                 $instr->onMatch,
                 $jump,
             );
@@ -342,9 +535,9 @@ PHP;
             $code = "        switch ({$instr->var}) {\n";
             foreach ($instr->cases as $literal => $target) {
                 $exp = var_export((string) $literal, true);
-                $code .= "            case {$exp}: goto {$target};\n";
+                $code .= "            case {$exp}: goto {$labelPrefix}{$target};\n";
             }
-            $code .= "            default: goto {$instr->default};\n";
+            $code .= "            default: goto {$labelPrefix}{$instr->default};\n";
             $code .= "        }\n";
 
             return $code;
@@ -354,9 +547,11 @@ PHP;
             $cond = $this->emitConstraintCondition($instr->var, $instr->constraint);
 
             return sprintf(
-                "        if (%s) { goto %s; }\n        goto %s;\n",
+                "        if (%s) { goto %s%s; }\n        goto %s%s;\n",
                 $cond,
+                $labelPrefix,
                 $instr->onMatch,
+                $labelPrefix,
                 $instr->onFail,
             );
         }
@@ -378,16 +573,24 @@ PHP;
         }
 
         if ($instr instanceof BranchEOF) {
+            if ($knownSegmentCount !== null) {
+                $target = $instr->segmentCount === $knownSegmentCount ? $instr->onEof : $instr->onMore;
+
+                return $target === $fallthroughLabel ? '' : "        goto {$labelPrefix}{$target};\n";
+            }
+
             return sprintf(
-                "        if (\$segCount === %d) { goto %s; }\n        goto %s;\n",
+                "        if (\$segCount === %d) { goto %s%s; }\n        goto %s%s;\n",
                 $instr->segmentCount,
+                $labelPrefix,
                 $instr->onEof,
+                $labelPrefix,
                 $instr->onMore,
             );
         }
 
         if ($instr instanceof Jump) {
-            return sprintf("        goto %s;\n", $instr->target);
+            return sprintf("        goto %s%s;\n", $labelPrefix, $instr->target);
         }
 
         if ($instr instanceof ReturnMatch) {

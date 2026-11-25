@@ -73,12 +73,22 @@ final class TrieFactoringPass implements PassInterface
         ];
 
         if ($candidates === []) {
-            return new LIRFunction($method, 'miss', $blocks);
+            return new LIRFunction(
+                method: $method,
+                entryLabel: 'miss',
+                blocks: $blocks,
+                specializeSegmentCounts: true,
+            );
         }
 
         $entry = $this->emitRun($candidates, 0, 'miss', [], $blocks);
 
-        return new LIRFunction($method, $entry, $blocks);
+        return new LIRFunction(
+            method: $method,
+            entryLabel: $entry,
+            blocks: $blocks,
+            specializeSegmentCounts: true,
+        );
     }
 
     /**

@@ -27,11 +27,15 @@ final class LatencySampler
         }
 
         $samples = [];
-        $totalStart = hrtime(true);
         for ($i = 0; $i < $iterations; $i++) {
             $t0 = hrtime(true);
             $operation();
             $samples[] = (hrtime(true) - $t0) / 1000.0;
+        }
+
+        $totalStart = hrtime(true);
+        for ($i = 0; $i < $iterations; $i++) {
+            $operation();
         }
         $totalSec = (hrtime(true) - $totalStart) / 1e9;
         sort($samples);

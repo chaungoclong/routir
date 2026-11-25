@@ -62,6 +62,11 @@ final class BlockCleanupPass implements PassInterface
             }
         }
 
-        return new LIRFunction($fn->method, $fn->entryLabel, $kept);
+        return new LIRFunction(
+            method: $fn->method,
+            entryLabel: $fn->entryLabel,
+            blocks: $kept,
+            specializeSegmentCounts: $fn->specializeSegmentCounts,
+        );
     }
 }

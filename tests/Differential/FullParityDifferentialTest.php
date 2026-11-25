@@ -45,6 +45,7 @@ $router->prefix('/api')->name('api.')->group(static function (Router $r): void {
 
 $router->get('/{any}/fallback-branch', static fn (string $any): string => 'any:' . $any);
 $router->get('/{user:alpha}/profile', static fn (string $user): string => 'alpha:' . $user);
+$router->get('/symbols/{value}', static fn (string $value): string => 'symbol:' . $value);
 
 $router->fallback(static fn (): string => 'custom-404');
 PHP;
@@ -97,6 +98,8 @@ PHP;
             ['GET', '/john/fallback-branch'],
             ['GET', '/123/fallback-branch'],
             ['GET', '/john/profile'],
+            ['GET', '/symbols/@!$&\'()+,;=:'],
+            ['GET', '/symbols/xin-chào'],
             ['GET', '/unknown'],
             ['GET', '/%ZZ'],
         ];

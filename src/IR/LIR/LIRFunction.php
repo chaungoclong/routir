@@ -7,12 +7,16 @@ namespace Routir\IR\LIR;
 final class LIRFunction
 {
     /**
-     * @param array<string, LIRBasicBlock> $blocks
+     * @param string $method HTTP method compiled by this function.
+     * @param string $entryLabel Entry basic-block label.
+     * @param array<string, LIRBasicBlock> $blocks Basic blocks keyed by label.
+     * @param bool $specializeSegmentCounts Whether the emitter may partial-evaluate exact segment counts.
      */
     public function __construct(
         public readonly string $method,
         public string $entryLabel,
         public array $blocks = [],
+        public readonly bool $specializeSegmentCounts = false,
     ) {
     }
 

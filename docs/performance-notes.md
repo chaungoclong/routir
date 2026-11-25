@@ -120,13 +120,38 @@ Kiểm chứng parity & chất lượng: `make qa` pass **86 tests (1901 asserti
 
 ---
 
-## 3. Backlog — Các điểm chưa tối ưu (Cơ hội tối ưu tiếp theo)
+## 3. Đợt tối ưu #3 — O2 Segment-Count Specialization (2026-11-25)
 
-1. **Loại bỏ `dispatchMethod()` wrapper & rút gọn `goto` chain trong `PHPMatcherEmitter` (100 routes OPcache ON)**
-   - Ở mốc 100 routes (OPcache ON), `Routir (Compiled -O2 match)` đạt `1.47 µs` (`626k ops/s`), hơi chậm hơn `Symfony Routing (Compiled)` (`1.06 µs`, `886k ops/s`). Nguyên nhân là thêm 1 tầng gọi `dispatchMethod()` và kiểm tra `isset($segments[$i])` lặp lại ở từng depth trước `BranchEOF`.
+### Giải pháp đã triển khai
 
-2. **Giảm cấp phát `MatchResult` trên đường dẫn `CompiledRouter::dispatch()`**
+- Đánh dấu riêng LIR sinh bởi `TrieFactoringPass` để emitter chỉ áp dụng specialization cho `-O2`.
+- Với trie nhỏ, không có wildcard và có tối đa ba độ dài route chính xác:
+  - Dispatch sớm bằng `$segCount`.
+  - Partial-evaluate `ReadSegment` và `BranchEOF` theo độ dài đã biết.
+  - Loại bỏ các `isset($segments[$i])`, EOF branch và basic block không thể tới trong từng lane.
+- Giữ nguyên generic matcher cho wildcard, nhiều độ dài hoặc graph lớn để tránh phình artifact.
+- Thay validator `strspn()` bằng `ctype_print()` + `strpbrk()` trên clean request target.
+- Tách latency sampling khỏi throughput batch và đo generated matcher trực tiếp trong benchmark `match`.
+
+### Kết quả
+
+Benchmark chuẩn `make bench`, PHP 8.4.22:
+
+| Routes / Mode | Routir O2 dyn p50 | Routir O2 dyn ops/s | Symfony dyn p50 | Symfony dyn ops/s |
+| --- | ---: | ---: | ---: | ---: |
+| 100, OPcache ON | **1.40 µs** | **732,540** | **1.40 µs** | 724,793 |
+| 100, OPcache OFF | **0.88 µs** | **1,096,141** | 1.11 µs | 842,418 |
+| 500, OPcache ON | **1.13 µs** | **917,244** | 2.06 µs | 472,358 |
+| 500, OPcache OFF | **1.08 µs** | **901,828** | 2.19 µs | 376,509 |
+
+Ở 100 routes, O2 đã tiệm cận hoặc vượt Symfony trong lượt benchmark đầy đủ và vượt mốc 1 triệu ops/s khi OPcache CLI tắt. Kết quả tuyệt đối dao động theo tải CPU; p50 và thứ hạng tương đối cần được đọc cùng nhau.
+
+---
+
+## 4. Backlog — Các điểm chưa tối ưu (Cơ hội tối ưu tiếp theo)
+
+1. **Giảm cấp phát `MatchResult` trên đường dẫn `CompiledRouter::dispatch()`**
    - `CompiledRouter::dispatch()` gọi `$this->matcher->match(...)` tạo object `MatchResult`, sau đó đọc `routeId`/`params` rồi bỏ. Có thể cân nhắc internal fast method hoặc giữ `MatchResult` tối giản khi `dispatch()`.
 
-3. **Tối ưu PSR-7 `CompiledRouter::dispatch()` (`2.1–3.8 µs`)**
+2. **Tối ưu PSR-7 `CompiledRouter::dispatch()` (`1.5–2.7 µs`)**
    - `DefaultResponseAdapter` tạo `MinimalResponse` + `MinimalStream` qua `MinimalPsr17Factory` trên mỗi response string/array. Có thể tối ưu fast-path cho string response hoặc giảm số lần gọi factory trung gian.

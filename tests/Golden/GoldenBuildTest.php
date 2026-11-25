@@ -35,3 +35,32 @@ test('build is deterministic across runs', function (): void {
         exec('rm -rf ' . escapeshellarg($dir1) . ' ' . escapeshellarg($dir2));
     }
 });
+
+test('O2 specializes small exact-route tries by segment count', function (): void {
+    $router = new Router();
+    $router->get('/users/{id:int}', static fn (int $id): string => (string) $id)->name('users.show');
+    $router->get('/api/v1/posts/{slug:slug}', static fn (string $slug): string => $slug)->name('posts.show');
+
+    $dir = sys_get_temp_dir() . '/routir_specialized_' . uniqid('', true);
+
+    try {
+        new Compiler()->compileToDirectory(
+            collection: $router->getCollection(),
+            outputDir: $dir,
+            options: new CompilerOptions(optimizationLevel: 2),
+        );
+
+        $code = file_get_contents($dir . '/current/matcher.php');
+
+        expect($code)->toBeString();
+        assert(is_string($code));
+
+        expect($code)
+            ->toContain('switch ($segCount)')
+            ->toContain('case 2: goto sc2_')
+            ->toContain('case 4: goto sc4_')
+            ->and(str_contains($code, 'if (!isset($segments['))->toBeFalse();
+    } finally {
+        exec('rm -rf ' . escapeshellarg($dir));
+    }
+});

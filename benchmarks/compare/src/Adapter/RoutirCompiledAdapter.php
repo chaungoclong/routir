@@ -10,17 +10,17 @@ use Routir\Benchmarks\Contract\RouterBenchmarkAdapterInterface;
 use Routir\Benchmarks\Model\RouteSpec;
 use Routir\Compiler\Compiler;
 use Routir\Compiler\CompilerOptions;
+use Routir\Contracts\MatcherInterface;
 use Routir\Contracts\MatchStatus;
 use Routir\Exception\CompilationException;
 use Routir\Exception\RoutirException;
-use Routir\Runtime\CompiledRouter;
 
 /**
  * Benchmark adapter for Routir in AOT Compiled mode at a specific optimization level.
  */
 final class RoutirCompiledAdapter implements RouterBenchmarkAdapterInterface
 {
-    private CompiledRouter $router;
+    private MatcherInterface $matcher;
 
     /**
      * @param int $optimizationLevel Compiler optimization level (0, 1, or 2).
@@ -66,7 +66,7 @@ final class RoutirCompiledAdapter implements RouterBenchmarkAdapterInterface
         }
 
         $artifactDir = $workDir . '/routir_o' . $this->optimizationLevel;
-        new Compiler()->compileToDirectory(
+        $result = new Compiler()->compileToDirectory(
             collection: $router->getCollection(),
             outputDir: $artifactDir,
             options: new CompilerOptions(
@@ -76,12 +76,14 @@ final class RoutirCompiledAdapter implements RouterBenchmarkAdapterInterface
             ),
         );
 
-        $this->router = CompiledRouter::load($artifactDir);
+        /** @var MatcherInterface $matcher */
+        $matcher = require $result['releaseDir'] . '/matcher.php';
+        $this->matcher = $matcher;
     }
 
     #[Override]
     public function execute(string $target): bool
     {
-        return $this->router->matchRequest('GET', $target)->status === MatchStatus::Found;
+        return $this->matcher->match('GET', $target)->status === MatchStatus::Found;
     }
 }
