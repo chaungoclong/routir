@@ -68,17 +68,65 @@ Kiểm chứng parity & chất lượng: `make qa` pass **86 tests (1901 asserti
 
 ---
 
-## 2. Backlog — Các điểm chưa tối ưu (Cơ hội tối ưu tiếp theo)
+## 2. Đợt tối ưu #2 — Interpreted Runtime Trie & Compiled Static Fast-Path (2026-11-25)
 
-1. **Static route fast-path trước `PathNormalizer::normalize()` (`Static: 0.61 µs` vs FastRoute `0.11 µs`)**
-   - Hiện tại `PHPMatcherEmitter::match()` luôn chạy `PathNormalizer::normalize()` (`explode` tạo mảng `$segments`) trước khi tra `STATIC_TABLES[$method][$rawPath]`.
-   - Nếu `STATIC_TABLES[$method][$requestTarget]` hit ngay khi `$requestTarget` là đường dẫn sạch (không `?`, `#`, `%`, `\`, control byte, `/./`, `/../`), có thể trả về `MatchResult` ngay lập tức mà **không cần `explode()` tạo mảng `$segments`**.
+### Nguyên nhân gây chậm (Root Causes)
+
+1. **Chế độ thông dịch (`ReferenceMatcher`) quét tuyến tính `O(N)` trên mọi request**
+   - `ReferenceMatcher::matchForMethod()` duyệt tuần tự toàn bộ danh sách `$this->candidates` (500 phần tử), gọi `in_array($method, ...)`, gọi `matchCandidate()`, kiểm tra `count()`, và lặp lại vòng `foreach ($route->segments)` để tính `$defaults` trên mỗi lần match.
+   - `collectAllowedMethods()` cũng lặp lại toàn bộ 500 candidates trên mỗi request 404.
+   - Hệ quả: ở 500 routes, Interpreted mode chậm hơn cả `Laravel RouteCollection` (`64.47 µs` với OPcache ON, `246.97 µs` với OPcache OFF).
+
+2. **Compiled `-O2` luôn chạy `PathNormalizer::normalize()` trước khi tra `STATIC_TABLES`**
+   - Dù route tĩnh nằm sẵn trong `STATIC_TABLES[$method][$path]`, `PHPMatcherEmitter::match()` vẫn gọi `PathNormalizer::normalize()` (`explode` tạo mảng `$segments`) và `dispatchMethod()` trước khi kiểm tra bảng tĩnh.
+
+### Giải pháp đã triển khai
+
+- **[`ReferenceMatcher.php`](../src/Interpreter/ReferenceMatcher.php)**:
+  - Precompute `$defaults` một lần duy nhất trong `__construct()` thay vì tính lại trên mỗi request.
+  - Xây dựng `staticTables[$method][$path]` để tra cứu `O(1)` ngay đầu `match()` (kèm zero-alloc fast-path khi `!str_contains($requestTarget, '%')`).
+  - Phân tách dynamic candidates theo `$method` và dựng **in-memory runtime trie** (gom bucket literal `O(1)` hash lookup + gom `param_group` liên tiếp), bảo toàn 100% thứ tự ưu tiên của `ReferenceMatcher`.
+- **[`PHPMatcherEmitter.php`](../src/Backend/PHP/PHPMatcherEmitter.php)**:
+  - Thêm zero-alloc fast-path tra trực tiếp `self::STATIC_TABLES[$method][$requestTarget]` (khi `!str_contains($requestTarget, '%')`) ngay đầu `match()`, bỏ qua hoàn toàn `PathNormalizer::normalize()` và `explode()` cho route tĩnh.
+
+### Bằng chứng (Benchmark `make bench` — PHP 8.4.22, 500 routes, sorted by `Dyn ops/s` desc)
+
+**1. OPcache ON (`opcache.enable_cli=1`, JIT `tracing`):**
+
+| Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
+| --- | ---: | ---: | ---: | ---: |
+| **Routir (Compiled `-O2` match)** | **0.53** | **1.47** | **1.11** | **651,790** |
+| **Routir (Interpreted match)** *(từ 14,505 →)* | **0.34** | **1.68** | **0.87** | **567,276** |
+| Symfony Routing (`Compiled`) | 0.30 | 2.07 | 1.81 | 430,199 |
+| **Routir (Compiled `-O2` PSR-7)** | 2.13 | 3.15 | 1.67 | 305,158 |
+| FastRoute (`cachedDispatcher`) | **0.15** | 6.26 | 4.18 | 153,381 |
+| FastRoute (`simpleDispatcher`) | 0.16 | 6.58 | 4.20 | 138,669 |
+| League Route (PSR-7 dispatch) | 3.74 | 11.43 | 6.53 | 82,832 |
+| Laravel Routing (`Compiled`) | 10.36 | 13.44 | — | 61,000+ |
+
+**2. OPcache OFF (`opcache.enable_cli=0`):**
+
+| Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
+| --- | ---: | ---: | ---: | ---: |
+| **Routir (Compiled `-O2` match)** | **0.45** | **1.54** | **1.19** | **596,432** |
+| Symfony Routing (`Compiled`) | 0.64 | 2.63 | 2.21 | 347,248 |
+| **Routir (Interpreted match)** *(từ 3,769 →)* | **0.47** | **3.13** | **1.52** | **231,623** |
+| **Routir (Compiled `-O2` PSR-7)** | 2.19 | 3.76 | 2.23 | 214,053 |
+| FastRoute (`cachedDispatcher`) | **0.26** | 7.60 | 5.31 | 125,873 |
+| FastRoute (`simpleDispatcher`) | **0.26** | 7.73 | 5.24 | 120,799 |
+| Laravel Routing (`Compiled`) | 11.41 | 14.84 | 18,134.55 | 58,881 |
+
+Kiểm chứng parity & chất lượng: `make qa` pass **86 tests (1901 assertions)** (bao gồm Differential O0/O1/O2, Golden, Fuzz) và **PHPStan Level 9 (0 errors)**.
+
+---
+
+## 3. Backlog — Các điểm chưa tối ưu (Cơ hội tối ưu tiếp theo)
+
+1. **Loại bỏ `dispatchMethod()` wrapper & rút gọn `goto` chain trong `PHPMatcherEmitter` (100 routes OPcache ON)**
+   - Ở mốc 100 routes (OPcache ON), `Routir (Compiled -O2 match)` đạt `1.47 µs` (`626k ops/s`), hơi chậm hơn `Symfony Routing (Compiled)` (`1.06 µs`, `886k ops/s`). Nguyên nhân là thêm 1 tầng gọi `dispatchMethod()` và kiểm tra `isset($segments[$i])` lặp lại ở từng depth trước `BranchEOF`.
 
 2. **Giảm cấp phát `MatchResult` trên đường dẫn `CompiledRouter::dispatch()`**
    - `CompiledRouter::dispatch()` gọi `$this->matcher->match(...)` tạo object `MatchResult`, sau đó đọc `routeId`/`params` rồi bỏ. Có thể cân nhắc internal fast method hoặc giữ `MatchResult` tối giản khi `dispatch()`.
 
-3. **Tối ưu PSR-7 `CompiledRouter::dispatch()` (`3.00–3.87 µs`)**
+3. **Tối ưu PSR-7 `CompiledRouter::dispatch()` (`2.1–3.8 µs`)**
    - `DefaultResponseAdapter` tạo `MinimalResponse` + `MinimalStream` qua `MinimalPsr17Factory` trên mỗi response string/array. Có thể tối ưu fast-path cho string response hoặc giảm số lần gọi factory trung gian.
-
-4. **Tối ưu `-O1` / non-contiguous literal sorting khi độ đặc hiệu bằng nhau**
-   - Hiện tại `MIRLowering` giữ nguyên `registrationOrder` giữa các route khác prefix ở cùng độ sâu. Với các route có **nhiều param nối tiếp khác nhau** hoặc **optional segments xen kẽ**, có thể nghiên cứu radix/prefix merging sâu hơn ở cấp MIR/LIR mà vẫn bảo toàn 100% precedence.
