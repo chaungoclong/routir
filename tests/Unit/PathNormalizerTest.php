@@ -19,6 +19,13 @@ test('preserves trailing slash as empty segment', function (): void {
     expect(PathNormalizer::normalize('/users/'))->toBe(['users', '']);
 });
 
+test('normalizes printable punctuation and valid unicode without changing segments', function (): void {
+    expect(PathNormalizer::normalize('/symbols/@!$&\'()+,;=:'))
+        ->toBe(['symbols', '@!$&\'()+,;=:'])
+        ->and(PathNormalizer::normalize('/xin-chào/東京'))
+        ->toBe(['xin-chào', '東京']);
+});
+
 test('rejects invalid request targets', function (string $target): void {
     expect(static fn () => PathNormalizer::normalize($target))
         ->toThrow(InvalidRequestTargetException::class);

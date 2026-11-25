@@ -8,8 +8,6 @@ use Routir\Exception\InvalidRequestTargetException;
 
 final class PathNormalizer
 {
-    private const string SAFE_ASCII_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_-.~';
-
     /**
      * Normalize an HTTP request target into decoded path segments.
      *
@@ -30,8 +28,8 @@ final class PathNormalizer
             return [];
         }
 
-        // Fast-path: pure URL-safe ASCII without '%', '\', control bytes, or non-ASCII
-        if (strlen($path) === strspn($path, self::SAFE_ASCII_CHARS)) {
+        // Fast-path: printable ASCII without percent-encoding or backslashes.
+        if (ctype_print($path) && strpbrk($path, '%\\') === false) {
             $segments = explode('/', substr($path, 1));
             if (str_contains($path, '/.') && (in_array('.', $segments, true) || in_array('..', $segments, true))) {
                 throw new InvalidRequestTargetException('Dot segments ("." or "..") are not allowed in request target.');

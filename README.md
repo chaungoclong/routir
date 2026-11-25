@@ -247,28 +247,29 @@ Measured on **PHP 8.4.22** (2,000 iterations after 100 warmup iterations, 500 ro
 
 | Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
 | --- | ---: | ---: | ---: | ---: |
-| **Routir (Compiled `-O2` match)** | 0.53 | **1.47** | 1.11 | **651,790** |
-| **Routir (Interpreted match)** | 0.34 | 1.68 | **0.87** | **567,276** |
-| Symfony Routing (`Compiled`) | 0.30 | 2.07 | 1.81 | 430,199 |
-| **Routir (Compiled `-O2` PSR-7)** | 2.13 | 3.15 | 1.67 | 305,158 |
-| FastRoute (`cachedDispatcher`) | **0.15** | 6.26 | 4.18 | 153,381 |
-| FastRoute (`simpleDispatcher`) | 0.16 | 6.58 | 4.20 | 138,669 |
-| League Route (PSR-7 dispatch) | 3.74 | 11.43 | 6.53 | 82,832 |
-| Laravel Routing (`Compiled`) | 10.36 | 13.44 | — | 61,000+ |
+| **Routir (Compiled `-O2` match)** | **0.36** | **1.13** | **0.81** | **917,244** |
+| Symfony Routing (`Compiled`) | 0.41 | 2.06 | 1.76 | 472,358 |
+| **Routir (Compiled `-O2` PSR-7)** | 1.47 | 2.31 | 1.14 | 410,100 |
+| **Routir (Interpreted match)** | 0.43 | 2.58 | 1.07 | 366,456 |
+| FastRoute (`simpleDispatcher`) | **0.15** | 6.95 | 3.98 | 143,497 |
+| FastRoute (`cachedDispatcher`) | 0.16 | 7.32 | 4.10 | 138,577 |
+| League Route (PSR-7 dispatch) | 2.92 | 10.55 | 5.50 | 91,215 |
+| Laravel Routing (`Compiled`) | 10.65 | 13.73 | 19,991.05 | 68,793 |
 
 ### OPcache OFF (`opcache.enable_cli=0`)
 
 | Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
 | --- | ---: | ---: | ---: | ---: |
-| **Routir (Compiled `-O2` match)** | 0.45 | **1.54** | **1.19** | **596,432** |
-| Symfony Routing (`Compiled`) | 0.64 | 2.63 | 2.21 | 347,248 |
-| **Routir (Interpreted match)** | 0.47 | 3.13 | 1.52 | **231,623** |
-| **Routir (Compiled `-O2` PSR-7)** | 2.19 | 3.76 | 2.23 | 214,053 |
-| FastRoute (`cachedDispatcher`) | **0.26** | 7.60 | 5.31 | 125,873 |
-| FastRoute (`simpleDispatcher`) | **0.26** | 7.73 | 5.24 | 120,799 |
-| Laravel Routing (`Compiled`) | 11.41 | 14.84 | 18,134.55 | 58,881 |
+| **Routir (Compiled `-O2` match)** | 0.35 | **1.08** | **0.82** | **901,828** |
+| **Routir (Compiled `-O2` PSR-7)** | 1.76 | 2.61 | 1.36 | 391,430 |
+| **Routir (Interpreted match)** | 0.37 | 2.57 | 1.20 | 383,809 |
+| Symfony Routing (`Compiled`) | 0.60 | 2.19 | 1.81 | 376,509 |
+| FastRoute (`cachedDispatcher`) | 0.23 | 6.26 | 4.42 | 152,044 |
+| FastRoute (`simpleDispatcher`) | **0.20** | 6.16 | 4.83 | 139,277 |
+| League Route (PSR-7 dispatch) | 3.50 | 12.12 | 7.06 | 82,262 |
+| Laravel Routing (`Compiled`) | 10.55 | 14.68 | 14,451.36 | 54,772 |
 
-*(Actual numbers depend on hardware, PHP version, and OPcache/JIT configuration. See [docs/performance-notes.md](file:///home/long/Dev/router/docs/performance-notes.md) for optimization details.)*
+*(Actual numbers depend on hardware, PHP version, and OPcache/JIT configuration. See [docs/performance-notes.md](docs/performance-notes.md) for optimization details.)*
 
 ---
 
