@@ -1,4 +1,5 @@
 .DEFAULT_GOAL := help
+.NOTPARALLEL: bench
 SHELL := /bin/bash
 
 HOST_UID := $(shell id -u)
@@ -19,6 +20,7 @@ OPT ?= -O2
 PORT ?= 8000
 HOST ?= $(if $(filter 1,$(DOCKER)),0.0.0.0,127.0.0.1)
 ARGS ?=
+BENCH_ARGS ?=
 
 ##@ General
 
@@ -124,12 +126,18 @@ phpstan: ensure-docker ## Run PHPStan static analysis (Level 9)
 phpstan-clear: ensure-docker ## Clear PHPStan result cache
 	$(EXEC) vendor/bin/phpstan clear-result-cache
 
+.PHONY: phpstan-bench
+phpstan-bench: ensure-bench-deps ## Run PHPStan level 9 against the comparison benchmark harness
+	$(EXEC) vendor/bin/phpstan analyse --no-progress --level=9 \
+		--autoload-file=benchmarks/compare/vendor/autoload.php \
+		benchmarks/compare/src benchmarks/compare/bench.php benchmarks/compare/worker.php
+
 .PHONY: lint
 lint: ensure-docker ## Run PHP syntax check (php -l) across project files
 	$(EXEC) bash -c 'find src tests examples benchmarks -name "*.php" -print0 | xargs -0 -n1 -P4 php -l -n >/dev/null && php -l -n bin/routir >/dev/null && echo "All PHP files passed syntax check."'
 
 .PHONY: qa
-qa: test phpstan examples route-check ## Run all quality gates (Pest, PHPStan, examples, route-check)
+qa: test phpstan phpstan-bench examples route-check ## Run all quality gates (Pest, PHPStan, examples, route-check)
 
 ##@ Examples & Server
 
@@ -174,17 +182,35 @@ route-clear: ensure-docker ## Clear compiled route artifacts (OUT=tmp/routir)
 
 ##@ Benchmarks & Cleanup
 
-.PHONY: bench
-bench: ensure-docker ## Run cross-framework benchmark with both OPcache ON and OFF
+.PHONY: ensure-bench-deps
+ensure-bench-deps: ensure-docker
 	@if [ ! -f benchmarks/compare/vendor/autoload.php ]; then \
 		echo "Installing benchmark comparison dependencies..."; \
 		$(EXEC) composer --working-dir=benchmarks/compare install --no-interaction; \
 	fi
-	@echo ">>> [1/2] OPcache ON (opcache.enable_cli=1)"
-	$(EXEC) php -d opcache.enable_cli=1 benchmarks/compare/bench.php
-	@echo ""
-	@echo ">>> [2/2] OPcache OFF (opcache.enable_cli=0)"
-	$(EXEC) php -d opcache.enable_cli=0 benchmarks/compare/bench.php
+
+.PHONY: bench
+bench: bench-opcache bench-jit bench-no-opcache ## Run isolated benchmark in three OPcache/JIT modes
+
+.PHONY: bench-opcache
+bench-opcache: ensure-bench-deps ## Benchmark with OPcache optimizer enabled and JIT disabled
+	@echo ">>> OPcache ON, JIT OFF"
+	$(EXEC) php -d opcache.enable_cli=1 -d opcache.jit=off -d opcache.jit_buffer_size=0 benchmarks/compare/bench.php $(BENCH_ARGS)
+
+.PHONY: bench-jit
+bench-jit: ensure-bench-deps ## Benchmark with OPcache and tracing JIT enabled
+	@echo ">>> OPcache ON, tracing JIT ON"
+	$(EXEC) php -d opcache.enable_cli=1 -d opcache.jit=tracing -d opcache.jit_buffer_size=64M benchmarks/compare/bench.php $(BENCH_ARGS)
+
+.PHONY: bench-no-opcache
+bench-no-opcache: ensure-bench-deps ## Benchmark with CLI OPcache and JIT disabled
+	@echo ">>> OPcache OFF, JIT OFF"
+	$(EXEC) php -d opcache.enable_cli=0 benchmarks/compare/bench.php $(BENCH_ARGS)
+
+.PHONY: bench-quick
+bench-quick: ensure-bench-deps ## Run a short smoke benchmark, not suitable for published results
+	$(EXEC) php -d opcache.enable_cli=1 -d opcache.jit=off -d opcache.jit_buffer_size=0 benchmarks/compare/bench.php \
+		--iterations=1000 --latency-ms=30 --throughput-ms=30 --repeats=3 --warmup-ms=10 $(BENCH_ARGS)
 
 .PHONY: clean
 clean: ## Remove temporary artifacts and tool caches

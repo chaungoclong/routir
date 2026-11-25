@@ -9,6 +9,7 @@ use Illuminate\Events\Dispatcher;
 use Illuminate\Http\Request;
 use Illuminate\Routing\AbstractRouteCollection;
 use Illuminate\Routing\CompiledRouteCollection;
+use Illuminate\Routing\RouteCollection;
 use Illuminate\Routing\Router;
 use Override;
 use Routir\Benchmarks\Contract\RouterBenchmarkAdapterInterface;
@@ -65,6 +66,7 @@ final class LaravelRoutingAdapter implements RouterBenchmarkAdapterInterface
             }
         }
 
+        /** @var RouteCollection $routes */
         $routes = $router->getRoutes();
         $routes->refreshNameLookups();
 

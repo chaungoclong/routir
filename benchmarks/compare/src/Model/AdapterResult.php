@@ -35,9 +35,9 @@ final readonly class AdapterResult
      *     label: string,
      *     category: string,
      *     route_count: int,
-     *     static: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float},
-     *     dynamic: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float},
-     *     miss: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float}
+     *     static: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float, ops_rmad_percent: float},
+     *     dynamic: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float, ops_rmad_percent: float},
+     *     miss: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float, ops_rmad_percent: float}
      * }
      */
     public function toArray(): array
@@ -59,9 +59,9 @@ final readonly class AdapterResult
      *     label: string,
      *     category: string,
      *     route_count: int,
-     *     static: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float},
-     *     dynamic: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float},
-     *     miss: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float}
+     *     static: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float, ops_rmad_percent: float},
+     *     dynamic: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float, ops_rmad_percent: float},
+     *     miss: array{p50_us: float, p95_us: float, p99_us: float, ops_sec: float, ops_rmad_percent: float}
      * } $data
      *
      * @return self

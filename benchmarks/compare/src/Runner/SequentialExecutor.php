@@ -7,6 +7,7 @@ namespace Routir\Benchmarks\Runner;
 use Routir\Benchmarks\Contract\RouterBenchmarkAdapterInterface;
 use Routir\Benchmarks\Generator\RouteSpecGenerator;
 use Routir\Benchmarks\Model\AdapterResult;
+use Routir\Benchmarks\Model\BenchmarkConfig;
 use RuntimeException;
 
 /**
@@ -25,8 +26,7 @@ final readonly class SequentialExecutor
      *
      * @param RouterBenchmarkAdapterInterface $adapter Router adapter to benchmark.
      * @param int $routeCount Number of routes to register.
-     * @param int $iterations Number of timed iterations per scenario.
-     * @param int $warmup Number of warmup iterations per scenario.
+     * @param BenchmarkConfig $config Adaptive measurement configuration.
      *
      * @return AdapterResult
      *
@@ -35,8 +35,7 @@ final readonly class SequentialExecutor
     public function run(
         RouterBenchmarkAdapterInterface $adapter,
         int $routeCount,
-        int $iterations,
-        int $warmup,
+        BenchmarkConfig $config,
     ): AdapterResult {
         $specs = $this->generator->generate($routeCount);
         $targets = $this->generator->resolveTargets($routeCount);
@@ -69,18 +68,15 @@ final readonly class SequentialExecutor
                 routeCount: $routeCount,
                 static: $this->sampler->sample(
                     operation: static fn (): bool => $adapter->execute($staticTarget),
-                    iterations: $iterations,
-                    warmup: $warmup,
+                    config: $config,
                 ),
                 dynamic: $this->sampler->sample(
                     operation: static fn (): bool => $adapter->execute($dynamicTarget),
-                    iterations: $iterations,
-                    warmup: $warmup,
+                    config: $config,
                 ),
                 miss: $this->sampler->sample(
                     operation: static fn (): bool => $adapter->execute($missTarget),
-                    iterations: $iterations,
-                    warmup: $warmup,
+                    config: $config,
                 ),
             );
         } finally {

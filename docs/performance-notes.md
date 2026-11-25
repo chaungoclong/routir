@@ -2,6 +2,8 @@
 
 Tài liệu này ghi lại các phân tích nguyên nhân gây chậm, giải pháp đã triển khai, bằng chứng đo đạc (benchmark) và danh sách các điểm có thể tiếp tục tối ưu trong tương lai.
 
+> **Lưu ý phương pháp:** các bảng trong nhật ký tối ưu bên dưới là số đo lịch sử từ benchmark cũ dùng số iterations cố định và không cô lập process. Chúng hữu ích để theo dõi tiến trình tại thời điểm đo nhưng không nên dùng làm số liệu công bố hoặc so sánh chéo máy. Benchmark hiện tại dùng worker cô lập, time budget thích ứng, median throughput và `±rMAD`; xem [benchmark methodology](../benchmarks/compare/README.md).
+
 ---
 
 ## 1. Đợt tối ưu #1 — Compiled `-O2` Trie Dispatch & Hot-Path (2026-11-25)
@@ -133,7 +135,7 @@ Kiểm chứng parity & chất lượng: `make qa` pass **86 tests (1901 asserti
 - Thay validator `strspn()` bằng `ctype_print()` + `strpbrk()` trên clean request target.
 - Tách latency sampling khỏi throughput batch và đo generated matcher trực tiếp trong benchmark `match`.
 
-### Kết quả
+### Kết quả lịch sử (legacy benchmark harness)
 
 Benchmark chuẩn `make bench`, PHP 8.4.22:
 

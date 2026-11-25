@@ -233,43 +233,16 @@ php -S 127.0.0.1:8000 examples/02-compiled/server.php
 
 ## Benchmarks
 
-Run the cross-framework benchmark (`make bench`, runs both OPcache ON & OFF sequentially per adapter):
+Run the isolated cross-framework benchmark in three distinct runtime modes:
 
 ```bash
-make bench
-# Or directly:
-php benchmarks/compare/bench.php --routes=100,500
+make bench-opcache     # OPcache ON, JIT OFF
+make bench-jit         # OPcache ON, tracing JIT ON
+make bench-no-opcache  # OPcache OFF, JIT OFF
+make bench             # Run all three modes
 ```
 
-Measured on **PHP 8.4.22** (2,000 iterations after 100 warmup iterations, 500 routes, worst-case dynamic, sorted by `Dyn ops/s` descending):
-
-### OPcache ON (`opcache.enable_cli=1`, JIT `tracing`)
-
-| Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
-| --- | ---: | ---: | ---: | ---: |
-| **Routir (Compiled `-O2` match)** | **0.36** | **1.13** | **0.81** | **917,244** |
-| Symfony Routing (`Compiled`) | 0.41 | 2.06 | 1.76 | 472,358 |
-| **Routir (Compiled `-O2` PSR-7)** | 1.47 | 2.31 | 1.14 | 410,100 |
-| **Routir (Interpreted match)** | 0.43 | 2.58 | 1.07 | 366,456 |
-| FastRoute (`simpleDispatcher`) | **0.15** | 6.95 | 3.98 | 143,497 |
-| FastRoute (`cachedDispatcher`) | 0.16 | 7.32 | 4.10 | 138,577 |
-| League Route (PSR-7 dispatch) | 2.92 | 10.55 | 5.50 | 91,215 |
-| Laravel Routing (`Compiled`) | 10.65 | 13.73 | 19,991.05 | 68,793 |
-
-### OPcache OFF (`opcache.enable_cli=0`)
-
-| Router / Mode | Static (µs) | Dyn p50 (µs) | Miss p50 (µs) | Dyn ops/s |
-| --- | ---: | ---: | ---: | ---: |
-| **Routir (Compiled `-O2` match)** | 0.35 | **1.08** | **0.82** | **901,828** |
-| **Routir (Compiled `-O2` PSR-7)** | 1.76 | 2.61 | 1.36 | 391,430 |
-| **Routir (Interpreted match)** | 0.37 | 2.57 | 1.20 | 383,809 |
-| Symfony Routing (`Compiled`) | 0.60 | 2.19 | 1.81 | 376,509 |
-| FastRoute (`cachedDispatcher`) | 0.23 | 6.26 | 4.42 | 152,044 |
-| FastRoute (`simpleDispatcher`) | **0.20** | 6.16 | 4.83 | 139,277 |
-| League Route (PSR-7 dispatch) | 3.50 | 12.12 | 7.06 | 82,262 |
-| Laravel Routing (`Compiled`) | 10.55 | 14.68 | 14,451.36 | 54,772 |
-
-*(Actual numbers depend on hardware, PHP version, and OPcache/JIT configuration. See [docs/performance-notes.md](docs/performance-notes.md) for optimization details.)*
+Each adapter/route-count pair runs in a fresh PHP process. Latency uses adaptive sampling; throughput is the median of seven 500 ms batches and reports relative median absolute deviation (`±rMAD`). Direct match and PSR-7 dispatch results are separated because they perform different work. See the [benchmark methodology](benchmarks/compare/README.md) and [performance notes](docs/performance-notes.md).
 
 ---
 
