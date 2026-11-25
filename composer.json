@@ -2,7 +2,23 @@
     "name": "routir/routir",
     "description": "Framework-agnostic, Laravel-inspired HTTP router with interpreted and AOT compiled execution modes.",
     "type": "library",
+    "keywords": [
+        "router",
+        "routing",
+        "http",
+        "aot",
+        "compiler",
+        "psr-7",
+        "psr-11",
+        "psr-15",
+        "psr-17"
+    ],
+    "homepage": "https://github.com/chaungoclong/routir",
     "license": "MIT",
+    "support": {
+        "issues": "https://github.com/chaungoclong/routir/issues",
+        "source": "https://github.com/chaungoclong/routir"
+    },
     "require": {
         "php": "^8.4",
         "nikic/php-parser": "^5.0",
