@@ -4,6 +4,6 @@ parameters:
         - src
         - tests
         - bin/routir
-        - benchmarks
+        - benchmarks/bench.php
         - examples
     tmpDir: .phpstan.cache

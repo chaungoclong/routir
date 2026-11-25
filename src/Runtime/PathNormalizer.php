@@ -8,6 +8,8 @@ use Routir\Exception\InvalidRequestTargetException;
 
 final class PathNormalizer
 {
+    private const string SAFE_ASCII_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_-.~';
+
     /**
      * Normalize an HTTP request target into decoded path segments.
      *
@@ -17,28 +19,30 @@ final class PathNormalizer
     public static function normalize(string $requestTarget): array
     {
         // Strip query string and fragment if present
-        $qPos = strpos($requestTarget, '?');
-        $fPos = strpos($requestTarget, '#');
-        $cut = strlen($requestTarget);
-        if ($qPos !== false && $qPos < $cut) {
-            $cut = $qPos;
-        }
-        if ($fPos !== false && $fPos < $cut) {
-            $cut = $fPos;
-        }
-        $path = substr($requestTarget, 0, $cut);
+        $cut = strcspn($requestTarget, '?#');
+        $path = $cut === strlen($requestTarget) ? $requestTarget : substr($requestTarget, 0, $cut);
 
         if ($path === '' || $path[0] !== '/') {
             throw new InvalidRequestTargetException('Request target path must start with "/".');
         }
 
+        if ($path === '/') {
+            return [];
+        }
+
+        // Fast-path: pure URL-safe ASCII without '%', '\', control bytes, or non-ASCII
+        if (strlen($path) === strspn($path, self::SAFE_ASCII_CHARS)) {
+            $segments = explode('/', substr($path, 1));
+            if (str_contains($path, '/.') && (in_array('.', $segments, true) || in_array('..', $segments, true))) {
+                throw new InvalidRequestTargetException('Dot segments ("." or "..") are not allowed in request target.');
+            }
+
+            return $segments;
+        }
+
         // Check raw path for control bytes before splitting
         if (preg_match('/[\x00-\x1F\x7F]/', $path) === 1) {
             throw new InvalidRequestTargetException('Request target contains control characters.');
-        }
-
-        if ($path === '/') {
-            return [];
         }
 
         // Split raw path at literal '/' BEFORE percent-decoding

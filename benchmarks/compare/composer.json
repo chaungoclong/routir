@@ -1,0 +1,30 @@
+{
+    "name": "routir/benchmarks-compare",
+    "description": "Cross-framework and library router benchmarks for Routir",
+    "type": "project",
+    "license": "MIT",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../.."
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "illuminate/container": "^11.0 || ^12.0",
+        "illuminate/events": "^11.0 || ^12.0",
+        "illuminate/http": "^11.0 || ^12.0",
+        "illuminate/routing": "^11.0 || ^12.0",
+        "league/route": "^6.0",
+        "nikic/fast-route": "^1.3",
+        "nyholm/psr7": "^1.8",
+        "routir/routir": "*",
+        "symfony/http-foundation": "^7.0",
+        "symfony/routing": "^7.0"
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

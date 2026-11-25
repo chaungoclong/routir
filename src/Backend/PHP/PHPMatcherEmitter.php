@@ -17,6 +17,7 @@ use Routir\IR\LIR\ReadSegment;
 use Routir\IR\LIR\ResetCaptures;
 use Routir\IR\LIR\ReturnMatch;
 use Routir\IR\LIR\ReturnMiss;
+use Routir\IR\LIR\SwitchLiteral;
 use Routir\Semantic\NormalizedConstraint;
 
 final class PHPMatcherEmitter
@@ -71,7 +72,11 @@ final class PHPMatcherEmitter
         }
 
         $segCount = count($segments);
-        $rawPath = $segCount === 0 ? '/' : '/' . implode('/', $segments);
+        $rawPath = $segCount === 0
+            ? '/'
+            : ((!str_contains($requestTarget, '%') && !str_contains($requestTarget, '?') && !str_contains($requestTarget, '#'))
+                ? $requestTarget
+                : '/' . implode('/', $segments));
 
         $direct = $this->dispatchMethod($method, $segments, $segCount, $rawPath);
         if ($direct !== null) {
@@ -252,6 +257,18 @@ PHP;
             );
         }
 
+        if ($instr instanceof SwitchLiteral) {
+            $code = "        switch ({$instr->var}) {\n";
+            foreach ($instr->cases as $literal => $target) {
+                $exp = var_export((string) $literal, true);
+                $code .= "            case {$exp}: goto {$target};\n";
+            }
+            $code .= "            default: goto {$instr->default};\n";
+            $code .= "        }\n";
+
+            return $code;
+        }
+
         if ($instr instanceof GuardConstraint) {
             $cond = $this->emitConstraintCondition($instr->var, $instr->constraint);
 
@@ -316,7 +333,14 @@ PHP;
     {
         return match ($c->kind) {
             'none' => "{$var} !== ''",
-            'builtin' => sprintf('ConstraintRegistry::matchesBuiltin(%s, %s)', var_export($c->builtinName ?? '', true), $var),
+            'builtin' => match ($c->builtinName) {
+                'int' => "({$var} !== '' && strlen({$var}) <= 4096 && ctype_digit({$var}))",
+                'alpha' => "({$var} !== '' && strlen({$var}) <= 4096 && ctype_alpha({$var}))",
+                'alnum' => "({$var} !== '' && strlen({$var}) <= 4096 && ctype_alnum({$var}))",
+                'slug' => "({$var} !== '' && strlen({$var}) <= 4096 && preg_match('/^[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$/', {$var}) === 1)",
+                'uuid' => "({$var} !== '' && strlen({$var}) <= 4096 && preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', {$var}) === 1)",
+                default => sprintf('ConstraintRegistry::matchesBuiltin(%s, %s)', var_export($c->builtinName ?? '', true), $var),
+            },
             'in' => sprintf('ConstraintRegistry::matchesIn(%s, %s)', var_export($c->allowedValues, true), $var),
             'regex' => sprintf('ConstraintRegistry::matchesRegex(%s, %s)', var_export($c->compiledRegex ?? '', true), $var),
             default => 'false',

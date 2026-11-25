@@ -291,6 +291,7 @@ All `Makefile` targets auto-detect whether PHP 8.4+ is available locally (`DOCKE
 - [Usage Guide](file:///home/long/Dev/router/docs/usage-guide.md)
 - [Compiler Guide](file:///home/long/Dev/router/docs/compiler-guide.md)
 - [Architecture Decision Records (ADRs)](file:///home/long/Dev/router/docs/adr.md)
+- [Performance Notes & Optimization Log](file:///home/long/Dev/router/docs/performance-notes.md)
 - [Coding Agent Guidelines](file:///home/long/Dev/router/AGENTS.md)
 
 ---

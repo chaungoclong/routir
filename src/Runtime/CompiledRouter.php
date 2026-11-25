@@ -226,47 +226,50 @@ final class CompiledRouter implements RouterInterface
     private function dispatchMatched(MatchResult $result, ServerRequestInterface $request): ResponseInterface
     {
         $routeId = $result->routeId ?? -1;
-        $handlers = $this->handlers;
-        $container = $this->container;
-        $adapter = $this->responseAdapter;
         $params = $result->params;
-
-        $terminal = new readonly class (
-            $routeId,
-            $params,
-            $handlers,
-            $container,
-            $adapter,
-        ) implements RequestHandlerInterface {
-            /**
-             * @param array<string, string> $params
-             */
-            public function __construct(
-                private int $routeId,
-                private array $params,
-                private object $handlers,
-                private ?ContainerInterface $container,
-                private ResponseAdapterInterface $adapter,
-            ) {
-            }
-
-            public function handle(ServerRequestInterface $request): ResponseInterface
-            {
-                /** @phpstan-ignore-next-line */
-                $raw = $this->handlers->invoke($this->routeId, $this->params, $request, $this->container);
-
-                return $this->adapter->adapt($raw, $request);
-            }
-        };
 
         $topId = $this->pipelines['routeToTopology'][$routeId] ?? null;
         $mwList = $topId !== null ? ($this->pipelines['topologies'][$topId] ?? []) : [];
 
-        if ($mwList !== []) {
+        if ($mwList === []) {
+            /** @phpstan-ignore-next-line */
+            $raw = $this->handlers->invoke($routeId, $params, $request, $this->container);
+            $response = $this->responseAdapter->adapt($raw, $request);
+        } else {
+            $handlers = $this->handlers;
+            $container = $this->container;
+            $adapter = $this->responseAdapter;
+
+            $terminal = new readonly class (
+                $routeId,
+                $params,
+                $handlers,
+                $container,
+                $adapter,
+            ) implements RequestHandlerInterface {
+                /**
+                 * @param array<string, string> $params
+                 */
+                public function __construct(
+                    private int $routeId,
+                    private array $params,
+                    private object $handlers,
+                    private ?ContainerInterface $container,
+                    private ResponseAdapterInterface $adapter,
+                ) {
+                }
+
+                public function handle(ServerRequestInterface $request): ResponseInterface
+                {
+                    /** @phpstan-ignore-next-line */
+                    $raw = $this->handlers->invoke($this->routeId, $this->params, $request, $this->container);
+
+                    return $this->adapter->adapt($raw, $request);
+                }
+            };
+
             $pipeline = new MiddlewarePipeline($mwList, $this->container, $this->middlewareFactory);
             $response = $pipeline->handle($request, $terminal);
-        } else {
-            $response = $terminal->handle($request);
         }
 
         if ($result->headFallback) {
