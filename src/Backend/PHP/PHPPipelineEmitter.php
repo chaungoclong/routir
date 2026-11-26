@@ -36,8 +36,8 @@ final class PHPPipelineEmitter
             $routeToTopology[$route->id] = $topologyIds[$key];
         }
 
-        $topExport = var_export($topologies, true);
-        $mapExport = var_export($routeToTopology, true);
+        $topExport = CompactPhpExporter::export($topologies);
+        $mapExport = CompactPhpExporter::export($routeToTopology);
 
         return <<<PHP
 <?php

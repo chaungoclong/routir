@@ -127,7 +127,7 @@ final class Compiler
         $urlGenPhp = new PHPUrlGeneratorEmitter()->emit($hir);
         $metaEmitter = new PHPMetadataEmitter();
         $metadataPhp = $metaEmitter->emitMetadata($hir);
-        $sourceMapJson = json_encode($metaEmitter->buildSourceMap($hir), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
+        $sourceMapJson = json_encode($metaEmitter->buildSourceMap($hir), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n";
 
         $artifacts = [
             'matcher.php' => $matcherPhp,
