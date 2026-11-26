@@ -8,25 +8,95 @@ use Routir\IR\HIR\HIRModule;
 
 final class PHPUrlGeneratorEmitter
 {
+    private const int KIND_LITERAL = 0;
+    private const int KIND_PARAM = 1;
+    private const int KIND_WILDCARD = 2;
+
+    private const int FLAG_OPTIONAL = 4;
+
+    private const int CONSTRAINT_NONE = 0;
+    private const int CONSTRAINT_BUILTIN = 1;
+    private const int CONSTRAINT_IN = 2;
+    private const int CONSTRAINT_REGEX = 3;
+
+    /** @var array<string, int> */
+    private const array BUILTIN_IDS = [
+        'int' => 0,
+        'alpha' => 1,
+        'alnum' => 2,
+        'slug' => 3,
+        'uuid' => 4,
+    ];
+
+    /**
+     * Emit url-generator.php with bit-packed segment flags and pre-encoded merged literals.
+     *
+     * @param HIRModule $hir HIR module.
+     *
+     * @return string Generated PHP code.
+     */
     public function emit(HIRModule $hir): string
     {
+        /** @var array<string, list<array{0: int, 1: string}|array{0: int, 1: string, 2: string|list<string>}>> $routesData */
         $routesData = [];
+
         foreach ($hir->namedRoutes as $name => $route) {
-            $routesData[$name] = array_map(
-                static fn ($seg): array => [
-                    'kind' => $seg->kind,
-                    'value' => $seg->value,
-                    'optional' => $seg->optional,
-                    'constraintKind' => $seg->constraint->kind,
-                    'builtinName' => $seg->constraint->builtinName,
-                    'allowedValues' => $seg->constraint->allowedValues,
-                    'compiledRegex' => $seg->constraint->compiledRegex,
-                ],
-                $route->segments,
-            );
+            /** @var list<array{0: int, 1: string}|array{0: int, 1: string, 2: string|list<string>}> $packed */
+            $packed = [];
+            $pendingLiteral = null;
+
+            foreach ($route->segments as $seg) {
+                if ($seg->kind === 'literal') {
+                    $encoded = rawurlencode($seg->value);
+                    $pendingLiteral = $pendingLiteral === null ? $encoded : $pendingLiteral . '/' . $encoded;
+                    continue;
+                }
+
+                if ($pendingLiteral !== null) {
+                    $packed[] = [self::KIND_LITERAL, $pendingLiteral];
+                    $pendingLiteral = null;
+                }
+
+                $kindBits = $seg->kind === 'wildcard' ? self::KIND_WILDCARD : self::KIND_PARAM;
+                $optBit = $seg->optional ? self::FLAG_OPTIONAL : 0;
+
+                $cKind = match ($seg->constraint->kind) {
+                    'builtin' => self::CONSTRAINT_BUILTIN,
+                    'in' => self::CONSTRAINT_IN,
+                    'regex' => self::CONSTRAINT_REGEX,
+                    default => self::CONSTRAINT_NONE,
+                };
+
+                $builtinBits = 0;
+                $extra = null;
+                if ($cKind === self::CONSTRAINT_BUILTIN) {
+                    $bName = $seg->constraint->builtinName ?? '';
+                    if (isset(self::BUILTIN_IDS[$bName])) {
+                        $builtinBits = self::BUILTIN_IDS[$bName] << 5;
+                    } else {
+                        $builtinBits = 5 << 5;
+                        $extra = $bName;
+                    }
+                } elseif ($cKind === self::CONSTRAINT_IN) {
+                    $extra = $seg->constraint->allowedValues;
+                } elseif ($cKind === self::CONSTRAINT_REGEX) {
+                    $extra = $seg->constraint->compiledRegex ?? '';
+                }
+
+                $flags = $kindBits | $optBit | ($cKind << 3) | $builtinBits;
+                $packed[] = $extra === null
+                    ? [$flags, $seg->value]
+                    : [$flags, $seg->value, $extra];
+            }
+
+            if ($pendingLiteral !== null) {
+                $packed[] = [self::KIND_LITERAL, $pendingLiteral];
+            }
+
+            $routesData[$name] = $packed;
         }
 
-        $export = var_export($routesData, true);
+        $export = CompactPhpExporter::exportTopLevelMap($routesData);
 
         return <<<PHP
 <?php
@@ -38,7 +108,7 @@ use Routir\\Exception\\UrlGenerationException;
 use Routir\\Runtime\\ConstraintRegistry;
 
 return new class {
-    /** @var array<string, list<array{kind: string, value: string, optional: bool, constraintKind: string, builtinName: ?string, allowedValues: list<string>, compiledRegex: ?string}>> */
+    /** @var array<string, list<array{0: int, 1: string, 2?: string|list<string>}>> */
     private const array ROUTES = {$export};
 
     public function has(string \$name): bool
@@ -61,15 +131,17 @@ return new class {
         \$omittedOptional = false;
 
         foreach (\$segments as \$seg) {
-            if (\$seg['kind'] === 'literal') {
-                \$builtSegments[] = rawurlencode(\$seg['value']);
+            \$flags = \$seg[0];
+            \$kind = \$flags & 3;
+            if (\$kind === 0) {
+                \$builtSegments[] = \$seg[1];
                 continue;
             }
 
-            \$paramName = \$seg['value'];
+            \$paramName = \$seg[1];
             \$hasValue = array_key_exists(\$paramName, \$params) && \$params[\$paramName] !== null;
 
-            if (\$seg['kind'] === 'wildcard') {
+            if (\$kind === 2) {
                 if (!\$hasValue) {
                     throw new UrlGenerationException(sprintf('Missing required wildcard parameter "%s" for route "%s".', \$paramName, \$name));
                 }
@@ -91,7 +163,7 @@ return new class {
             }
 
             if (!\$hasValue) {
-                if (!\$seg['optional']) {
+                if ((\$flags & 4) === 0) {
                     throw new UrlGenerationException(sprintf('Missing required parameter "%s" for route "%s".', \$paramName, \$name));
                 }
                 \$omittedOptional = true;
@@ -109,11 +181,19 @@ return new class {
                 throw new UrlGenerationException(sprintf('Parameter "%s" cannot be empty or contain "/" for route "%s".', \$paramName, \$name));
             }
 
-            \$matched = match (\$seg['constraintKind']) {
-                'none' => true,
-                'builtin' => ConstraintRegistry::matchesBuiltin(\$seg['builtinName'] ?? '', \$strVal),
-                'in' => ConstraintRegistry::matchesIn(\$seg['allowedValues'], \$strVal),
-                'regex' => ConstraintRegistry::matchesRegex(\$seg['compiledRegex'] ?? '', \$strVal),
+            \$cKind = (\$flags >> 3) & 3;
+            \$matched = match (\$cKind) {
+                0 => true,
+                1 => match (\$flags >> 5) {
+                    0 => !isset(\$strVal[4096]) && ctype_digit(\$strVal),
+                    1 => !isset(\$strVal[4096]) && ctype_alpha(\$strVal),
+                    2 => !isset(\$strVal[4096]) && ctype_alnum(\$strVal),
+                    3 => !isset(\$strVal[4096]) && preg_match('/^[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$/', \$strVal) === 1,
+                    4 => strlen(\$strVal) === 36 && preg_match('/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', \$strVal) === 1,
+                    default => ConstraintRegistry::matchesBuiltin(is_string(\$seg[2] ?? null) ? \$seg[2] : '', \$strVal),
+                },
+                2 => is_array(\$seg[2] ?? null) && ConstraintRegistry::matchesIn(\$seg[2], \$strVal),
+                3 => ConstraintRegistry::matchesRegex(is_string(\$seg[2] ?? null) ? \$seg[2] : '', \$strVal),
                 default => false,
             };
 

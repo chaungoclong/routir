@@ -23,7 +23,7 @@ final class PHPHandlerEmitter
     }
 
     /**
-     * Emit handlers.php containing compiled handler invocation methods.
+     * Emit handlers.php containing compiled handler invocation dispatch.
      *
      * @param HIRModule $hir HIR module.
      *
@@ -35,22 +35,49 @@ final class PHPHandlerEmitter
      */
     public function emit(HIRModule $hir): string
     {
+        $hasClosures = $hir->fallbackPlan !== null && $hir->fallbackPlan->kind === 'closure';
+        /** @var array<string, list<int>> $groupedArms */
+        $groupedArms = [];
+        /** @var list<array{id: int, expr: string}> $uniqueArms */
+        $uniqueArms = [];
+
+        foreach ($hir->routes as $route) {
+            $plan = $route->handlerPlan;
+            if ($plan->kind === 'closure') {
+                $hasClosures = true;
+            }
+            $expr = $this->emitInvokeExpr($route->id, $plan, false);
+            if ($plan->kind === 'closure') {
+                $uniqueArms[] = ['id' => $route->id, 'expr' => $expr];
+            } else {
+                $groupedArms[$expr][] = $route->id;
+            }
+        }
+
         $code = "<?php\n\ndeclare(strict_types=1);\n\n";
         $code .= "use Psr\\Container\\ContainerInterface;\n";
         $code .= "use Psr\\Http\\Message\\ServerRequestInterface;\n";
         $code .= "use Routir\\Exception\\DispatchException;\n";
         $code .= "use Routir\\Runtime\\ParameterConverter;\n\n";
         $code .= "return new class {\n";
-        $code .= "    /** @var array<int, \\Closure> */\n";
-        $code .= "    private array \$closures = [];\n";
-        $code .= "    private ?\\Closure \$fallbackClosure = null;\n\n";
+        if ($hasClosures) {
+            $code .= "    /** @var array<int, \\Closure> */\n";
+            $code .= "    private array \$closures = [];\n";
+            $code .= "    private ?\\Closure \$fallbackClosure = null;\n\n";
+        }
 
-        $code .= "    /**\n     * @param array<string, string> \$routeParams\n     */\n";
+        $code .= "    /** @param array<string, string> \$routeParams */\n";
         $code .= "    public function invoke(int \$routeId, array \$routeParams, ServerRequestInterface \$request, ?ContainerInterface \$container): mixed\n    {\n";
         $code .= "        return match (\$routeId) {\n";
-        foreach ($hir->routes as $route) {
-            $code .= sprintf("            %d => \$this->invoke_%d(\$routeParams, \$request, \$container),\n", $route->id, $route->id);
+
+        foreach ($groupedArms as $expr => $ids) {
+            $idList = implode(', ', $ids);
+            $code .= "            {$idList} => {$expr},\n";
         }
+        foreach ($uniqueArms as $arm) {
+            $code .= "            {$arm['id']} => {$arm['expr']},\n";
+        }
+
         $code .= "            default => throw new DispatchException('Unknown compiled route ID: ' . \$routeId),\n";
         $code .= "        };\n";
         $code .= "    }\n\n";
@@ -61,18 +88,12 @@ final class PHPHandlerEmitter
 
         $code .= "    public function invokeFallback(ServerRequestInterface \$request, ?ContainerInterface \$container): mixed\n    {\n";
         if ($hir->fallbackPlan !== null) {
-            $code .= $this->emitInvokeBody(-1, $hir->fallbackPlan, true);
+            $fallbackExpr = $this->emitInvokeExpr(-1, $hir->fallbackPlan, true);
+            $code .= "        return {$fallbackExpr};\n";
         } else {
             $code .= "        throw new DispatchException('No fallback handler compiled.');\n";
         }
         $code .= "    }\n\n";
-
-        foreach ($hir->routes as $route) {
-            $code .= "    /**\n     * @param array<string, string> \$routeParams\n     */\n";
-            $code .= sprintf("    private function invoke_%d(array \$routeParams, ServerRequestInterface \$request, ?ContainerInterface \$container): mixed\n    {\n", $route->id);
-            $code .= $this->emitInvokeBody($route->id, $route->handlerPlan, false);
-            $code .= "    }\n\n";
-        }
 
         $code .= <<<'PHP'
     private function resolveService(string $className, ?ContainerInterface $container, bool $hasDefault, mixed $default): object
@@ -106,21 +127,20 @@ PHP;
     }
 
     /**
-     * Emit the invocation body for a compiled route or fallback handler.
+     * Emit the single-expression invocation for a compiled route or fallback handler.
      *
      * @param int $routeId Route ID (-1 for fallback).
      * @param HandlerPlan $plan Handler plan metadata.
      * @param bool $isFallback Whether this is the fallback handler.
      *
-     * @return string Generated PHP statements.
+     * @return string Generated PHP expression.
      *
      * @throws CompilationException When the handler or closure cannot be compiled.
      * @throws ReflectionException When closure reflection fails.
      * @throws LogicException When an unknown parameter source is encountered.
      */
-    private function emitInvokeBody(int $routeId, HandlerPlan $plan, bool $isFallback): string
+    private function emitInvokeExpr(int $routeId, HandlerPlan $plan, bool $isFallback): string
     {
-        $body = '';
         $argExprs = array_map(
             fn (ParameterPlan $p): string => $this->emitParameterExpr($p, $isFallback),
             $plan->parameters,
@@ -130,22 +150,17 @@ PHP;
         if ($plan->kind === 'closure' && $plan->closure !== null) {
             $extracted = $this->closureExtractor->extract($plan->closure);
             if ($isFallback) {
-                $body .= "        \$fn = \$this->fallbackClosure ??= {$extracted->factoryCode};\n";
-            } else {
-                $body .= "        \$fn = \$this->closures[{$routeId}] ??= {$extracted->factoryCode};\n";
+                return "(\$this->fallbackClosure ??= {$extracted->factoryCode})({$argsList})";
             }
-            $body .= "        return \$fn({$argsList});\n";
 
-            return $body;
+            return "(\$this->closures[{$routeId}] ??= {$extracted->factoryCode})({$argsList})";
         }
 
         if (($plan->kind === 'controller' || $plan->kind === 'invokable') && $plan->className !== null && $plan->methodName !== null) {
             $clsExport = var_export($plan->className, true);
             $method = $plan->methodName;
-            $body .= "        \$instance = \$this->resolveService({$clsExport}, \$container, false, null);\n";
-            $body .= "        return \$instance->{$method}({$argsList});\n";
 
-            return $body;
+            return "\$this->resolveService({$clsExport}, \$container, false, null)->{$method}({$argsList})";
         }
 
         throw CompilationException::fromDiagnostic(new Diagnostic(
@@ -180,17 +195,17 @@ PHP;
                 ));
             }
 
-            return var_export($p->bindingValue, true);
+            return CompactPhpExporter::export($p->bindingValue);
         }
 
         if ($p->source === 'route_param') {
             if ($isFallback) {
-                return $p->hasDefault ? var_export($p->defaultValue, true) : 'null';
+                return $p->hasDefault ? CompactPhpExporter::export($p->defaultValue) : 'null';
             }
             $nameExp = var_export($p->name, true);
             $typeExp = var_export($p->typeName, true);
             $fallbackExpr = $p->hasDefault
-                ? var_export($p->defaultValue, true)
+                ? CompactPhpExporter::export($p->defaultValue)
                 : ($p->allowsNull ? 'null' : "throw new DispatchException('Missing route parameter: ' . {$nameExp})");
 
             return "array_key_exists({$nameExp}, \$routeParams) ? ParameterConverter::convertRouteParam(\$routeParams[{$nameExp}], {$typeExp}, {$nameExp}) : ({$fallbackExpr})";
@@ -216,7 +231,7 @@ PHP;
                 ));
             }
 
-            return var_export($p->defaultValue, true);
+            return CompactPhpExporter::export($p->defaultValue);
         }
 
         throw new LogicException('Unknown parameter source: ' . $p->source);

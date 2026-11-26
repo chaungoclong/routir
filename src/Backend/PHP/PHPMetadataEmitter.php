@@ -20,7 +20,7 @@ final class PHPMetadataEmitter
             ];
         }
 
-        $export = var_export($routes, true);
+        $export = CompactPhpExporter::exportTopLevelMap($routes);
 
         return <<<PHP
 <?php
